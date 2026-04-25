@@ -1,93 +1,54 @@
 package io.github.umbraproxy
 
-import android.content.ComponentName
-import android.content.Context
-import android.graphics.drawable.Icon
-import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class ProxyTileService : TileService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var listenJob: Job? = null
+
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Main + job)
 
     override fun onStartListening() {
         super.onStartListening()
-        listenJob?.cancel()
-        listenJob = scope.launch {
-            ProxyService.isRunning.collectLatest { isRunning ->
-                renderTile(if (isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE)
-            }
-        }
-        renderTile()
-    }
-
-    override fun onStopListening() {
-        listenJob?.cancel()
-        listenJob = null
-        super.onStopListening()
+        updateTile(ProxyService.isRunning.value)
     }
 
     override fun onClick() {
         super.onClick()
-        val toggleAction: () -> Unit = {
+        
+        val isCurrentlyRunning = ProxyService.isRunning.value
+
+        if (isCurrentlyRunning) {
+            ProxyController.stop(this)
+            updateTile(false)
+        } else {
             scope.launch {
-                val wasRunning = ProxyService.isRunning.value
-                if (wasRunning) {
-                    renderTile(Tile.STATE_INACTIVE)
-                    ProxyController.stop(this@ProxyTileService)
-                } else {
-                    val started = ProxyController.startFromSavedSettings(
-                        context = this@ProxyTileService,
-                        showInvalidPortToast = true
-                    )
-                    renderTile(if (started) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE)
-                }
+                ProxyController.startFromSavedSettings(this@ProxyTileService, showInvalidPortToast = true)
+                updateTile(true)
             }
         }
+    }
 
-        if (isLocked) {
-            unlockAndRun(toggleAction)
+    private fun updateTile(isRunning: Boolean) {
+        val tile = qsTile ?: return
+        
+        if (isRunning) {
+            tile.state = Tile.STATE_ACTIVE
+            tile.label = "Umbra Active"
         } else {
-            toggleAction()
+            tile.state = Tile.STATE_INACTIVE
+            tile.label = "Umbra Off"
         }
+        
+        tile.updateTile()
     }
 
     override fun onDestroy() {
-        listenJob?.cancel()
-        scope.cancel()
         super.onDestroy()
-    }
-
-    private fun renderTile(overrideState: Int? = null) {
-        qsTile?.apply {
-            label = "UmbraProxy"
-            icon = Icon.createWithResource(this@ProxyTileService, android.R.drawable.ic_secure)
-            state = overrideState ?: if (ProxyService.isRunning.value) {
-                Tile.STATE_ACTIVE
-            } else {
-                Tile.STATE_INACTIVE
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                subtitle = if (state == Tile.STATE_ACTIVE) "Active" else "Inactive"
-            }
-            contentDescription = label
-            updateTile()
-        }
-    }
-
-    companion object {
-        fun requestSync(context: Context) {
-            runCatching {
-                requestListeningState(context, ComponentName(context, ProxyTileService::class.java))
-            }
-        }
+        job.cancel()
     }
 }
