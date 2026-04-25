@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,7 +18,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,10 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -57,13 +52,13 @@ class MainActivity : ComponentActivity() {
             requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         checkBatteryOptimizations()
-
+        
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContent {
             val context = LocalContext.current
             val settingsStore = remember { SettingsStore(context) }
-
+            
             UmbraProxyTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -96,7 +91,7 @@ fun UmbraApp(settingsStore: SettingsStore) {
     val scope = rememberCoroutineScope()
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val savedPort by settingsStore.port.collectAsStateWithLifecycle(initialValue = "1443")
-
+    
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true
@@ -129,9 +124,9 @@ fun UmbraApp(settingsStore: SettingsStore) {
                     color = MaterialTheme.colorScheme.onBackground,
                     letterSpacing = 8.sp
                 )
-
+                
                 Spacer(modifier = Modifier.height(64.dp))
-
+                
                 MainConnectButton(
                     isRunning = isRunning,
                     onToggle = {
@@ -144,19 +139,18 @@ fun UmbraApp(settingsStore: SettingsStore) {
                         }
                     }
                 )
-
+                
                 Spacer(modifier = Modifier.height(32.dp))
-
+                
                 Text(
                     text = if (isRunning) "SECURE CONNECTION ACTIVE" else "TAP TO CONNECT",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isRunning) UmbraColors.ActiveGlow else MaterialTheme.colorScheme.onSurfaceVariant,
                     letterSpacing = 2.sp
                 )
-
+                
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 🚀 زر الربط المباشر مع تليجرام
                 if (isRunning) {
                     Button(
                         onClick = {
@@ -202,17 +196,12 @@ fun MainConnectButton(isRunning: Boolean, onToggle: () -> Unit) {
 
 @Composable
 fun BottomSheetContent(settingsStore: SettingsStore) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(horizontal = 24.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.5f).padding(horizontal = 24.dp)) {
         Row(modifier = Modifier.fillMaxWidth().height(40.dp), Arrangement.Center, Alignment.CenterVertically) {
             Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Row(modifier = Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-            TextButton(onClick = { selectedTab = 0 }) { Text("SETTINGS", color = if (selectedTab == 0) UmbraColors.ActiveGlow else MaterialTheme.colorScheme.onSurfaceVariant) }
-            TextButton(onClick = { selectedTab = 1 }) { Text("LOGS", color = if (selectedTab == 1) UmbraColors.ActiveGlow else MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
         Spacer(modifier = Modifier.height(16.dp))
-        if (selectedTab == 0) SettingsList(settingsStore) else SimpleLogsList()
+        SettingsList(settingsStore)
     }
 }
 
@@ -239,17 +228,6 @@ fun SettingsList(settingsStore: SettingsStore) {
                 Text("Cloudflare Routing", color = MaterialTheme.colorScheme.onSurface)
                 Switch(checked = cfEnabled, onCheckedChange = { scope.launch { settingsStore.saveAll(true, "", "", "", "", "", "", "", "", "", "", "", "", false, portText, 4, it, false, "", "") } }, enabled = !isRunning)
             }
-        }
-    }
-}
-
-@Composable
-fun SimpleLogsList() {
-    val currentLogs by LogManager.logs.collectAsStateWithLifecycle()
-    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(currentLogs, key = { it.key }) { entry ->
-            val color = when (entry.priority) { 6 -> UmbraColors.LogError; 5 -> UmbraColors.LogWarning; else -> UmbraColors.LogInfo }
-            Text(text = "${if(entry.count > 1) "[x${entry.count}] " else ""}${entry.message}", color = color, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.fillMaxWidth())
         }
     }
 }
