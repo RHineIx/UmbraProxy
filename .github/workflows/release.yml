@@ -12,38 +12,56 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1 # تقليل عمق الجلب لتسريع التحميل
 
+      # 1. إعداد Go مع تفعيل الكاش التلقائي للموديلات والبناء
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
 
+      # 2. إعداد Java و Gradle مع أقوى نظام كاش متاح حالياً
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
+      # 3. استخدام أداة Gradle المتطورة (تتعامل مع الكاش بذكاء شديد للمكتبات والـ Wrapper)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 4. تخزين الـ NDK يدوياً لأنه يأخذ وقتاً طويلاً في التحميل
+      - name: Cache NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/r26b
+          key: ${{ runner.os }}-ndk-r26b
+
       - name: Setup Android NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26b
 
+      # 5. بناء المكتبة البرمجية مع استخدام الكاش الخاص بـ Go
       - name: Build Native Library (16KB Aligned)
         run: |
           mkdir -p app/src/main/jniLibs/arm64-v8a
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
           export CC=$TOOLCHAIN/bin/aarch64-linux-android34-clang
           GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$CC \
-          go build -buildmode=c-shared \
+          go build -v -buildmode=c-shared \
           -ldflags="-linkmode=external -extldflags=-Wl,-z,common-page-size=16384,-z,max-page-size=16384" \
           -o app/src/main/jniLibs/arm64-v8a/libumbraproxy.so tg-ws-proxy.go
 
+      # 6. بناء الـ APK مع تمرير بارامترات السرعة لـ Gradle
       - name: Build Unsigned APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --parallel --build-cache --configuration-cache
 
       - name: Create Auto Tag
         id: create_tag
@@ -58,8 +76,6 @@ jobs:
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           name: Release ${{ steps.create_tag.outputs.tag }}
-          draft: false
-          prerelease: false
           files: app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
