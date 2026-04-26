@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -39,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -137,7 +139,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     LaunchedEffect(savedSecretKey) {
         if (savedSecretKey.isBlank()) {
             val generated = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-            settingsStore.saveSecretKey(generated)
+            scope.launch { settingsStore.saveSecretKey(generated) }
         }
     }
 
@@ -184,7 +186,8 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                         OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey, savedProxyTag) },
                             enabled = !isRunning, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp))
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant))
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -212,11 +215,27 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                         Switch(
                             checked = isSponsorEnabled,
                             onCheckedChange = { checked ->
-                                val tag = if (checked) "feeec91f71d1400df6609f820936b1dd" else ""
-                                saveSettings(portText, savedCfEnabled, savedPoolSize, savedSecretKey, tag)
+                                val newTag = if (checked) "feeec91f71d1400df6609f820936b1dd" else ""
+                                saveSettings(portText, savedCfEnabled, savedPoolSize, savedSecretKey, newTag)
                             },
                             enabled = !isRunning
                         )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Proxy Secret", style = MaterialTheme.typography.bodyLarge)
+                            Text(text = "GENERATE", style = MaterialTheme.typography.labelMedium, color = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !isRunning) {
+                                    focusManager.clearFocus()
+                                    val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
+                                    saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret, savedProxyTag)
+                                }.padding(8.dp))
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
+                            Text(text = secretForUrl, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
                     }
                 }
             }

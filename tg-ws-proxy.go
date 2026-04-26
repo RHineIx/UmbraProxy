@@ -3019,6 +3019,21 @@ func FreeString(p *C.char) {
 	C.free(unsafe.Pointer(p))
 }
 
+
+var (
+	proxyTag   string
+	proxyTagMu sync.RWMutex
+)
+
+//export SetProxyTag
+func SetProxyTag(cTag *C.char) {
+	tag := C.GoString(cTag)
+	proxyTagMu.Lock()
+	proxyTag = tag
+	proxyTagMu.Unlock()
+}
+
+
 func main() {
 	runtime.LockOSThread()
 	initLogging(true)

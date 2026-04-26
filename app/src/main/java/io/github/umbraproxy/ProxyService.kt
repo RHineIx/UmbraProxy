@@ -49,11 +49,12 @@ class ProxyService : Service() {
         val port = intent?.getIntExtra("PORT", 1443) ?: 1443
         val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
         val secret = intent?.getStringExtra("SECRET") ?: ""
+        val proxyTag = intent?.getStringExtra("PROXY_TAG") ?: "" // <-- استلام التاغ
 
         startForeground(NOTIFICATION_ID, createNotification("Starting UmbraProxy..."))
 
         CoroutineScope(Dispatchers.IO).launch {
-            val success = NativeProxy.startProxy(port, cfEnabled, secret)
+            val success = NativeProxy.startProxy(port, cfEnabled, secret, proxyTag) // <-- إرسال التاغ للمحرك
             withContext(Dispatchers.Main) {
                 if (success) {
                     updateState(true)
@@ -77,7 +78,6 @@ class ProxyService : Service() {
                     val up = extractValue(rawStats, "up=")
                     val down = extractValue(rawStats, "down=")
 
-                    // 🚀 تصميم مبسط وأنيق للإشعار بدون أسهم
                     val content = "Sessions: $sessions  •  Down: $down  •  Up: $up"
                     updateNotification(content)
                 }

@@ -14,6 +14,7 @@ object ProxyController {
         val port = portText.toIntOrNull()
         val cfEnabled = settingsStore.cfproxyEnabled.first()
         var secretKey = settingsStore.secretKey.first()
+        val proxyTag = settingsStore.proxyTag.first() // <-- جلب التاغ المخزن
 
         if (secretKey.length != 32) {
             secretKey = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 32)
@@ -31,6 +32,7 @@ object ProxyController {
             putExtra("PORT", port)
             putExtra("CF_ENABLED", cfEnabled)
             putExtra("SECRET", secretKey)
+            putExtra("PROXY_TAG", proxyTag) // <-- تمرير التاغ لخدمة الخلفية
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
