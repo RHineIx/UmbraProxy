@@ -7,6 +7,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+/**
+ * Controller for the Quick Settings Tile.
+ * Ensures the toggle button in the notification shade reflects the service state.
+ */
 class ProxyTileService : TileService() {
 
     private val job = SupervisorJob()
@@ -19,36 +23,27 @@ class ProxyTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        
-        val isCurrentlyRunning = ProxyService.isRunning.value
-
-        if (isCurrentlyRunning) {
+        val isRunning = ProxyService.isRunning.value
+        if (isRunning) {
             ProxyController.stop(this)
             updateTile(false)
         } else {
             scope.launch {
-                ProxyController.startFromSavedSettings(this@ProxyTileService, showInvalidPortToast = true)
+                ProxyController.startFromSavedSettings(this@ProxyTileService, false)
                 updateTile(true)
             }
         }
     }
 
-    private fun updateTile(isRunning: Boolean) {
+    private fun updateTile(active: Boolean) {
         val tile = qsTile ?: return
-        
-        if (isRunning) {
-            tile.state = Tile.STATE_ACTIVE
-            tile.label = "Umbra Active"
-        } else {
-            tile.state = Tile.STATE_INACTIVE
-            tile.label = "Umbra Off"
-        }
-        
+        tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        tile.label = if (active) "Umbra Active" else "Umbra Off"
         tile.updateTile()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         job.cancel()
+        super.onDestroy()
     }
 }

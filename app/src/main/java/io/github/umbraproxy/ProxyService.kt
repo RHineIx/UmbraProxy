@@ -11,16 +11,20 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class ProxyService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
+    private var statsUpdateJob: Job? = null
 
     companion object {
-        private const val CHANNEL_ID = "UmbraProxyChannel"
-        private const val NOTIFICATION_ID = 1
+        private const val CHANNEL_ID = "UmbraProxyCore"
+        private const val NOTIFICATION_ID = 101
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning
@@ -38,7 +42,7 @@ class ProxyService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_SERVICE") {
-            stopSelf()
+            stopProxyInternal()
             return START_NOT_STICKY
         }
 
@@ -46,23 +50,81 @@ class ProxyService : Service() {
         val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
         val secret = intent?.getStringExtra("SECRET") ?: ""
 
-        startForeground(NOTIFICATION_ID, createNotification(port.toString()))
-        
-        Thread {
-            // Start the native proxy and update the UI state based on success
+        startForeground(NOTIFICATION_ID, createNotification("Starting UmbraProxy..."))
+
+        CoroutineScope(Dispatchers.IO).launch {
             val success = NativeProxy.startProxy(port, cfEnabled, secret)
-            updateState(success)
-            if (!success) {
-                stopSelf()
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    updateState(true)
+                    startStatsMonitor()
+                } else {
+                    stopSelf()
+                }
             }
-        }.start()
+        }
 
         return START_STICKY
     }
 
-    override fun onDestroy() {
-        Thread { NativeProxy.stopProxy() }.start()
+    private fun startStatsMonitor() {
+        statsUpdateJob?.cancel()
+        statsUpdateJob = serviceScope.launch {
+            while (isActive) {
+                val rawStats = NativeProxy.getStats()
+                if (rawStats != null) {
+                    val sessions = extractValue(rawStats, "active=")
+                    val up = extractValue(rawStats, "up=")
+                    val down = extractValue(rawStats, "down=")
+
+                    // 🚀 تصميم مبسط وأنيق للإشعار بدون أسهم
+                    val content = "Sessions: $sessions  •  Down: $down  •  Up: $up"
+                    updateNotification(content)
+                }
+                delay(3000)
+            }
+        }
+    }
+
+    private fun extractValue(stats: String, key: String): String {
+        return stats.substringAfter(key, "").substringBefore(" ", "0")
+    }
+
+    private fun updateNotification(content: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, createNotification(content))
+    }
+
+    private fun createNotification(content: String): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val stopIntent = Intent(this, ProxyService::class.java).apply { action = "STOP_SERVICE" }
+        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("UmbraProxy")
+            .setContentText(content)
+            .setSmallIcon(android.R.drawable.ic_secure)
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(pendingIntent)
+            .addAction(0, "Disconnect", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    private fun stopProxyInternal() {
+        statsUpdateJob?.cancel()
+        NativeProxy.stopProxy()
         updateState(false)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        serviceJob.cancel()
         releaseWakeLock()
         super.onDestroy()
     }
@@ -71,56 +133,20 @@ class ProxyService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "UmbraProxy Background Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Maintains the proxy connection in the background"
-            }
+            val channel = NotificationChannel(CHANNEL_ID, "Connection Status", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(serviceChannel)
+            manager.createNotificationChannel(channel)
         }
-    }
-
-    private fun createNotification(port: String): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val stopIntent = Intent(this, ProxyService::class.java).apply {
-            action = "STOP_SERVICE"
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 1, stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("UmbraProxy Active")
-            .setContentText("Routing through port $port")
-            .setSmallIcon(android.R.drawable.ic_secure)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
     }
 
     private fun acquireWakeLock() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "UmbraProxy::WakeLock").apply {
-            acquire(24 * 60 * 60 * 1000L) // 24 hours maximum
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Umbra::WakeLock").apply {
+            acquire(12 * 60 * 60 * 1000L)
         }
     }
 
     private fun releaseWakeLock() {
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
-        }
+        if (wakeLock?.isHeld == true) wakeLock?.release()
     }
 }
