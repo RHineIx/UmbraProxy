@@ -42,21 +42,26 @@ class ProxyService : Service() {
             return START_NOT_STICKY
         }
 
-        val port = intent?.getStringExtra("PORT") ?: "1443"
+        val port = intent?.getIntExtra("PORT", 1443) ?: 1443
         val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
+        val secret = intent?.getStringExtra("SECRET") ?: ""
 
-        startForeground(NOTIFICATION_ID, createNotification(port))
+        startForeground(NOTIFICATION_ID, createNotification(port.toString()))
         
         Thread {
-            NativeProxy.startProxy(port, cfEnabled)
-            updateState(true)
+            // Start the native proxy and update the UI state based on success
+            val success = NativeProxy.startProxy(port, cfEnabled, secret)
+            updateState(success)
+            if (!success) {
+                stopSelf()
+            }
         }.start()
 
         return START_STICKY
     }
 
     override fun onDestroy() {
-        NativeProxy.stopProxy()
+        Thread { NativeProxy.stopProxy() }.start()
         updateState(false)
         releaseWakeLock()
         super.onDestroy()
