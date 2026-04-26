@@ -86,7 +86,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val savedCfEnabled by settingsStore.cfproxyEnabled.collectAsStateWithLifecycle(initialValue = true)
     val savedPoolSize by settingsStore.poolSize.collectAsStateWithLifecycle(initialValue = 4)
     val savedSecretKey by settingsStore.secretKey.collectAsStateWithLifecycle(initialValue = "")
-    val savedProxyTag by settingsStore.proxyTag.collectAsStateWithLifecycle(initialValue = "")
 
     val isDcAuto by settingsStore.isDcAuto.collectAsStateWithLifecycle(initialValue = true)
     val dc1 by settingsStore.dc1.collectAsStateWithLifecycle(initialValue = "")
@@ -106,7 +105,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val customCfDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
 
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
-    val isSponsorEnabled = savedProxyTag == "feeec91f71d1400df6609f820936b1dd"
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -146,12 +144,12 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val secretForUrl = if (savedSecretKey.isNotBlank()) savedSecretKey else "00000000000000000000000000000000"
     val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=dd$secretForUrl"
 
-    val saveSettings = { newPort: String, newCf: Boolean, newPool: Int, newSecret: String, newTag: String ->
+    val saveSettings = { newPort: String, newCf: Boolean, newPool: Int, newSecret: String ->
         scope.launch {
             settingsStore.saveAll(
                 isDcAuto, dc1, dc2, dc3, dc4, dc5, dc203,
                 dc1m, dc2m, dc3m, dc4m, dc5m, dc203m,
-                isExperimental, newPort, newPool, newCf, customCfDomainEnabled, customCfDomain, newSecret, newTag
+                isExperimental, newPort, newPool, newCf, customCfDomainEnabled, customCfDomain, newSecret
             )
         }
     }
@@ -183,7 +181,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Local Port", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey, savedProxyTag) },
+                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey) },
                             enabled = !isRunning, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
@@ -192,7 +190,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cloudflare Routing", style = MaterialTheme.typography.bodyLarge)
-                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedPoolSize, savedSecretKey, savedProxyTag) }, enabled = !isRunning)
+                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -202,24 +200,12 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
                                 Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
-                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, size, savedSecretKey, savedProxyTag) },
+                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, size, savedSecretKey) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
                                 }
                             }
                         }
-                    }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Support Developer Channel", style = MaterialTheme.typography.bodyLarge)
-                        Switch(
-                            checked = isSponsorEnabled,
-                            onCheckedChange = { checked ->
-                                val newTag = if (checked) "feeec91f71d1400df6609f820936b1dd" else ""
-                                saveSettings(portText, savedCfEnabled, savedPoolSize, savedSecretKey, newTag)
-                            },
-                            enabled = !isRunning
-                        )
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -229,7 +215,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus()
                                     val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-                                    saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret, savedProxyTag)
+                                    saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret)
                                 }.padding(8.dp))
                         }
                         Spacer(modifier = Modifier.height(12.dp))

@@ -1580,11 +1580,8 @@ func newMsgSplitter(initData []byte, proto uint32) (*MsgSplitter, error) {
 	if err != nil {
 		return nil, err
 	}
-	
-	// FIX: Dynamically skip bytes based on initData size to keep Keystream in sync.
-	// If a Proxy Tag is appended, initData will be 80 bytes instead of 64.
-	skip := make([]byte, len(initData))
-	stream.XORKeyStream(skip, skip) // Advance stream safely
+	skip := make([]byte, 64)
+	stream.XORKeyStream(skip, zero64)
 
 	return &MsgSplitter{
 		stream:    stream,
@@ -2634,24 +2631,6 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		relayInit[56+i] = tailPlain[i] ^ keystreamTail[i]
 	}
 
-	// ---- PROXY TAG INJECTION START ----
-	// Check if a sponsor tag is set and append it to the relayInit payload
-	proxyTagMu.RLock()
-	currentTag := proxyTag
-	proxyTagMu.RUnlock()
-
-	if len(currentTag) == 32 {
-		if tagBytes, err := hex.DecodeString(currentTag); err == nil && len(tagBytes) == 16 {
-			encTag := make([]byte, 16)
-			// Encrypt the tag using the AES-CTR stream that was just advanced by 64 bytes
-			tgEncryptor.XORKeyStream(encTag, tagBytes)
-			relayInit = append(relayInit, encTag...)
-		} else {
-			logError.Printf(" Invalid proxy tag format, ignoring")
-		}
-	}
-	// ---- PROXY TAG INJECTION END ----
-
 	dcKey := [2]int{dc, isMediaInt(isMedia)}
 	now := float64(time.Now().UnixNano()) / 1e9
 
@@ -3039,21 +3018,6 @@ func GetSecretWithPrefix() *C.char {
 func FreeString(p *C.char) {
 	C.free(unsafe.Pointer(p))
 }
-
-
-var (
-	proxyTag   string
-	proxyTagMu sync.RWMutex
-)
-
-//export SetProxyTag
-func SetProxyTag(cTag *C.char) {
-	tag := C.GoString(cTag)
-	proxyTagMu.Lock()
-	proxyTag = tag
-	proxyTagMu.Unlock()
-}
-
 
 func main() {
 	runtime.LockOSThread()

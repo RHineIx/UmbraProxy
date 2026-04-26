@@ -17,7 +17,6 @@ interface ProxyLibrary : Library {
     fun StopProxy(): Int
     fun SetPoolSize(size: Int)
     fun SetCfProxyConfig(enabled: Int, priority: Int, userDomain: String)
-    fun SetProxyTag(tag: String) // <-- إضافة الدالة للتعامل مع الـ Tag
     fun GetSecretWithPrefix(): Pointer?
     fun GetStats(): Pointer?
     fun FreeString(p: Pointer)
@@ -25,13 +24,8 @@ interface ProxyLibrary : Library {
 
 object NativeProxy {
 
-    fun startProxy(port: Int, cfEnabled: Boolean, secret: String, proxyTag: String): Boolean {
+    fun startProxy(port: Int, cfEnabled: Boolean, secret: String): Boolean {
         return try {
-            // محاولة إرسال الـ Tag (استخدمنا runCatching لضمان عدم انهيار التطبيق إذا لم تكن الدالة مبرمجة في الـ Go بعد)
-            if (proxyTag.isNotBlank()) {
-                runCatching { ProxyLibrary.INSTANCE.SetProxyTag(proxyTag) }
-            }
-            
             ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, "")
             val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, "", secret, 0)
             result == 0
