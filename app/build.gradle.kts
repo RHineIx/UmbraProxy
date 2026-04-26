@@ -23,7 +23,8 @@ android {
         }
 
         ndk {
-            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+            // 🚀 Explicitly limit to targeted ABIs to save build time
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
         }
     }
 
@@ -31,7 +32,8 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            // 🚀 Limit split generation
+            include("arm64-v8a", "armeabi-v7a")
             isUniversalApk = true
         }
     }
