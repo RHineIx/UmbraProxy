@@ -1,14 +1,22 @@
 package io.github.umbraproxy
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -42,6 +50,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.umbraproxy.ui.UmbraProxyTheme
@@ -63,12 +72,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@SuppressLint("BatteryLife")
 @Composable
 fun UmbraMainScreen(settingsStore: SettingsStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-
+    
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
 
@@ -95,6 +105,32 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val customCfDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
 
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
+
+    // معالج صلاحيات الإشعارات (Android 13+)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    // التحقق من الصلاحيات عند تشغيل التطبيق
+    LaunchedEffect(isReady) {
+        if (isReady) {
+            // 1. طلب إذن الإشعارات
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            // 2. طلب إيقاف تحسين البطارية للعمل في الخلفية
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            }
+        }
+    }
 
     if (!isReady) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -182,13 +218,10 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -197,25 +230,18 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                         Text("Local Port", style = MaterialTheme.typography.bodyLarge)
                         OutlinedTextField(
                             value = portText,
-                            onValueChange = {
+                            onValueChange = { 
                                 portText = it
                                 saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey)
                             },
                             enabled = !isRunning,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { focusManager.clearFocus() }
-                            ),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             modifier = Modifier.width(100.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
+                            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant)
                         )
                     }
 
@@ -239,10 +265,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text("Connection Pool Size", style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
                                 Surface(
@@ -250,9 +273,9 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                                         .weight(1f)
                                         .height(44.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .clickable(enabled = !isRunning) {
+                                        .clickable(enabled = !isRunning) { 
                                             focusManager.clearFocus()
-                                            saveSettings(portText, savedCfEnabled, size, savedSecretKey)
+                                            saveSettings(portText, savedCfEnabled, size, savedSecretKey) 
                                         },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
                                 ) {
@@ -286,7 +309,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable(enabled = !isRunning) {
                                         focusManager.clearFocus()
-                                        val newSecret = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 32)
+                                        val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
                                         saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret)
                                     }
                                     .padding(8.dp)
@@ -300,12 +323,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                 .padding(16.dp)
                         ) {
-                            Text(
-                                text = secretForUrl,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
-                            )
+                            Text(text = secretForUrl, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         }
                     }
                 }
@@ -313,17 +331,13 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FilledTonalButton(
                     onClick = {
                         val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cb.setPrimaryClip(ClipData.newPlainText("Proxy", proxyUrl))
                         Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                     },
-                    enabled = true,
                     modifier = Modifier.weight(1f).height(56.dp),
                     shape = RoundedCornerShape(16.dp)
                 ) {
@@ -334,28 +348,20 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     onClick = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(proxyUrl))
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        try {
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Telegram not installed", Toast.LENGTH_SHORT).show()
-                        }
+                        try { context.startActivity(intent) } catch (e: Exception) { Toast.makeText(context, "Telegram not installed", Toast.LENGTH_SHORT).show() }
                     },
                     enabled = isRunning,
                     modifier = Modifier.weight(3f).height(56.dp),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_telegram),
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
                     Text("Launch Telegram", style = MaterialTheme.typography.titleMedium)
                 }
             }
 
             Spacer(modifier = Modifier.weight(1f))
-
+            
             Text(
                 text = "@RHineix",
                 style = MaterialTheme.typography.labelSmall,
@@ -365,10 +371,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     .clickable {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/RHineix"))
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        try {
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                        }
+                        try { context.startActivity(intent) } catch (e: Exception) {}
                     }
                     .padding(vertical = 18.dp, horizontal = 8.dp)
             )
@@ -379,41 +382,18 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
 @Composable
 fun MainConnectionToggle(isRunning: Boolean, isStarting: Boolean, onClick: () -> Unit) {
     val isActiveVisual = isRunning || isStarting
-    val buttonColor by animateColorAsState(
-        targetValue = if (isActiveVisual) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        animationSpec = tween(400), label = "btn_color"
-    )
-    val iconColor by animateColorAsState(
-        targetValue = if (isActiveVisual) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = tween(400), label = "icon_color"
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (isActiveVisual) 1.05f else 1f,
-        animationSpec = tween(300), label = "btn_scale"
-    )
+    val buttonColor by animateColorAsState(targetValue = if (isActiveVisual) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, animationSpec = tween(400), label = "")
+    val iconColor by animateColorAsState(targetValue = if (isActiveVisual) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, animationSpec = tween(400), label = "")
+    val scale by animateFloatAsState(targetValue = if (isActiveVisual) 1.05f else 1f, animationSpec = tween(300), label = "")
 
     Surface(
-        modifier = Modifier
-            .size(140.dp)
-            .scale(scale)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            ),
+        modifier = Modifier.size(140.dp).scale(scale).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         shape = CircleShape,
         color = buttonColor,
-        shadowElevation = if (isActiveVisual) 12.dp else 2.dp
+        shadowElevation = if (isActiveVisual) 12.dp else 2.dp 
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_telegram),
-                contentDescription = "Connect",
-                tint = iconColor,
-                modifier = Modifier
-                    .size(68.dp)
-                    .offset(x = (-4).dp, y = 2.dp)
-            )
+            Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, tint = iconColor, modifier = Modifier.size(68.dp).offset(x = (-4).dp, y = 2.dp))
         }
     }
 }
