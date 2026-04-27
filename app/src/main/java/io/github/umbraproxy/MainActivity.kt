@@ -14,6 +14,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -40,7 +43,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -77,8 +82,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val settingsStore = remember { SettingsStore(context) }
+            var showLogsScreen by rememberSaveable { mutableStateOf(false) }
+
             UmbraProxyTheme {
-                UmbraMainScreen(settingsStore)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    UmbraMainScreen(
+                        settingsStore = settingsStore,
+                        onOpenLogs = { showLogsScreen = true }
+                    )
+
+                    // Full-Screen Logs Overlay
+                    AnimatedVisibility(
+                        visible = showLogsScreen,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        LogsScreen(onBack = { showLogsScreen = false })
+                    }
+                }
             }
         }
     }
@@ -86,7 +107,7 @@ class MainActivity : ComponentActivity() {
 
 @SuppressLint("BatteryLife")
 @Composable
-fun UmbraMainScreen(settingsStore: SettingsStore) {
+fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -123,8 +144,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
     var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
     var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
-
-    var showLogsSheet by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -167,7 +186,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val secretForUrl = if (savedSecretKey.isNotBlank()) savedSecretKey else "00000000000000000000000000000000"
     var fullSecretPrefix by remember { mutableStateOf("dd$secretForUrl") }
 
-    // Use Native Go Core to dynamically generate the correct secret payload (ee-secret for fakeTLS, dd-secret otherwise)
+    // Use Native Go Core to dynamically generate the correct secret payload
     LaunchedEffect(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain) {
         withContext(Dispatchers.IO) {
             NativeProxy.updateConfigForSecret(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain)
@@ -195,10 +214,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     var isStarting by remember { mutableStateOf(false) }
     LaunchedEffect(isRunning) { if (isRunning || !isRunning) { delay(600); isStarting = false } }
 
-    if (showLogsSheet) {
-        LogsBottomSheet(onDismiss = { showLogsSheet = false })
-    }
-
     Scaffold(
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
     ) { innerPadding ->
@@ -210,7 +225,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                IconButton(onClick = { showLogsSheet = true }) {
+                IconButton(onClick = onOpenLogs) {
                     Icon(Icons.Default.Terminal, contentDescription = "View Logs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -386,10 +401,15 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogsBottomSheet(onDismiss: () -> Unit) {
+fun LogsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+
+    // Handle physical back button
+    BackHandler {
+        onBack()
+    }
 
     // Auto-scroll to the bottom when new logs arrive
     LaunchedEffect(logs.size) {
@@ -398,59 +418,60 @@ fun LogsBottomSheet(onDismiss: () -> Unit) {
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF0A0A0A), // Deep black background for terminal feel
-        contentColor = Color.White
-    ) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("System Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "CLEAR", 
-                        style = MaterialTheme.typography.labelMedium, 
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { LogManager.clearLogs() }.padding(8.dp)
-                    )
-                    Text(
-                        text = "COPY", 
-                        style = MaterialTheme.typography.labelMedium, 
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
-                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val text = logs.joinToString("\n") { it.message }
-                            cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
-                            Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
-                        }.padding(8.dp)
-                    )
-                }
-            }
-            HorizontalDivider(color = Color.DarkGray)
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().padding(top = 8.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(logs) { log ->
-                    val color = when (log.level) {
-                        LogLevel.INFO -> Color(0xFF4CAF50) // Green
-                        LogLevel.WARN -> Color(0xFFFFC107) // Amber
-                        LogLevel.ERROR -> Color(0xFFF44336) // Red
-                        LogLevel.DEBUG -> Color(0xFF9E9E9E) // Grey
-                        LogLevel.UNKNOWN -> Color.White
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("System Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                    Text(
-                        text = log.message,
-                        color = color,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = FontFamily.Monospace
-                    )
+                },
+                actions = {
+                    IconButton(onClick = {
+                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val text = logs.joinToString("\n") { it.message }
+                        cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
+                        Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs")
+                    }
+                    IconButton(onClick = { LogManager.clearLogs() }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Clear Logs", tint = MaterialTheme.colorScheme.error)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0F0F0F),
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                )
+            )
+        },
+        containerColor = Color(0xFF0A0A0A) // Deep terminal black
+    ) { innerPadding ->
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(logs) { log ->
+                val color = when (log.level) {
+                    LogLevel.INFO -> Color(0xFF4CAF50) // Green
+                    LogLevel.WARN -> Color(0xFFFFC107) // Amber
+                    LogLevel.ERROR -> Color(0xFFF44336) // Red
+                    LogLevel.DEBUG -> Color(0xFF9E9E9E) // Grey
+                    LogLevel.UNKNOWN -> Color.White
                 }
+                Text(
+                    text = log.message,
+                    color = color,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace
+                )
             }
         }
     }
