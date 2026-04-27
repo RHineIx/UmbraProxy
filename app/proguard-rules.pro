@@ -30,6 +30,9 @@
 # JNA callback & structure support
 -keep class * implements com.sun.jna.Callback { *; }
 -keep class * extends com.sun.jna.Structure { *; }
+-renamesourcefileattribute ""
+-keepattributes !LineNumberTable,*
+
 
 # ─── Our proxy library interface and NativeProxy object ───
 -keep class io.github.umbraproxy.NativeProxy { *; }
