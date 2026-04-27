@@ -138,16 +138,3 @@ dependencies {
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     implementation("androidx.compose.material:material-icons-extended")
 }
-
-// 🚀 EXTREME OPTIMIZATION: Force Compilers to Strip All Debug Info and .line directives
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-    if (name.contains("Release")) {
-        kotlinOptions.freeCompilerArgs += "-g:none"
-    }
-}
-
-tasks.withType<JavaCompile>().configureEach {
-    if (name.contains("Release")) {
-        options.compilerArgs.add("-g:none")
-    }
-}
