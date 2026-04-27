@@ -55,7 +55,7 @@
             android:name=".ProxyTileService"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true"
-            android:icon="@android:drawable/ic_secure"
+            android:icon="@drawable/tile"
             android:label="UmbraProxy">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
