@@ -17,9 +17,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -80,6 +85,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val focusManager = LocalFocusManager.current
     
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
+    val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
 
     val savedPort by settingsStore.port.collectAsStateWithLifecycle(initialValue = "1443")
@@ -164,7 +170,8 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
             modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(64.dp))
+            Spacer(modifier = Modifier.height(48.dp))
+            
             MainConnectionToggle(isRunning = isRunning, isStarting = isStarting, onClick = {
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
@@ -173,10 +180,36 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     scope.launch { ProxyController.startFromSavedSettings(context, true) }
                 }
             })
+            
             Spacer(modifier = Modifier.height(24.dp))
             Text(text = when { isStarting -> "Connecting..."; isRunning -> "Connected & Secured"; else -> "System Standby" },
                 style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(56.dp))
+            
+            // 🚀 Real-time Stats Display Area
+            AnimatedVisibility(
+                visible = isRunning,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatItem("Sessions", liveStats.sessions)
+                    StatDivider()
+                    StatItem("Down", liveStats.down)
+                    StatDivider()
+                    StatItem("Up", liveStats.up)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
             ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -252,6 +285,20 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 }.padding(vertical = 18.dp, horizontal = 8.dp))
         }
     }
+}
+
+@Composable
+fun StatItem(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun StatDivider() {
+    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)))
 }
 
 @Composable

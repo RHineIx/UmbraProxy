@@ -17,6 +17,13 @@ import kotlinx.coroutines.flow.StateFlow
 
 class ProxyService : Service() {
 
+    // Data class to hold parsed live stats for the UI
+    data class ProxyStats(
+        val sessions: String = "0",
+        val up: String = "0 B",
+        val down: String = "0 B"
+    )
+
     private var wakeLock: PowerManager.WakeLock? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
@@ -29,8 +36,16 @@ class ProxyService : Service() {
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning
 
+        // StateFlow to broadcast live stats to the UI (MainActivity)
+        private val _liveStats = MutableStateFlow(ProxyStats())
+        val liveStats: StateFlow<ProxyStats> = _liveStats
+
         fun updateState(running: Boolean) {
             _isRunning.value = running
+            if (!running) {
+                // Reset stats when disconnected
+                _liveStats.value = ProxyStats()
+            }
         }
     }
 
@@ -77,10 +92,14 @@ class ProxyService : Service() {
                     val up = extractValue(rawStats, "up=")
                     val down = extractValue(rawStats, "down=")
 
+                    // Update UI StateFlow
+                    _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
+
+                    // Update Notification
                     val content = "Sessions: $sessions  •  Down: $down  •  Up: $up"
                     updateNotification(content)
                 }
-                delay(3000)
+                delay(2000) // Fast 2-second update for a snappy UI
             }
         }
     }
