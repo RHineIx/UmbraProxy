@@ -59,8 +59,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.umbraproxy.ui.UmbraProxyTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -107,10 +109,15 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val dc5m by settingsStore.dc5m.collectAsStateWithLifecycle(initialValue = "")
     val dc203m by settingsStore.dc203m.collectAsStateWithLifecycle(initialValue = "")
     val isExperimental by settingsStore.isExperimentalMode.collectAsStateWithLifecycle(initialValue = false)
-    val customCfDomainEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
-    val customCfDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
+    
+    val savedCfCustomEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val savedCfCustomDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
+    val savedFakeTlsEnabled by settingsStore.fakeTlsEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val savedFakeTlsDomain by settingsStore.fakeTlsDomain.collectAsStateWithLifecycle(initialValue = "")
 
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
+    var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
+    var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -148,14 +155,29 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     }
 
     val secretForUrl = if (savedSecretKey.isNotBlank()) savedSecretKey else "00000000000000000000000000000000"
-    val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=dd$secretForUrl"
+    var fullSecretPrefix by remember { mutableStateOf("dd$secretForUrl") }
 
-    val saveSettings = { newPort: String, newCf: Boolean, newPool: Int, newSecret: String ->
+    // Use Native Go Core to dynamically generate the correct secret payload (ee-secret for fakeTLS, dd-secret otherwise)
+    LaunchedEffect(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain) {
+        withContext(Dispatchers.IO) {
+            NativeProxy.updateConfigForSecret(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain)
+            val generatedSecret = NativeProxy.getSecretWithPrefix()
+            if (generatedSecret != null) {
+                fullSecretPrefix = generatedSecret
+            }
+        }
+    }
+
+    val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=$fullSecretPrefix"
+
+    val saveSettings = { newPort: String, newCf: Boolean, newCfCustom: Boolean, newCfDomain: String, newFakeTls: Boolean, newFakeTlsDomain: String, newPool: Int, newSecret: String ->
         scope.launch {
             settingsStore.saveAll(
                 isDcAuto, dc1, dc2, dc3, dc4, dc5, dc203,
                 dc1m, dc2m, dc3m, dc4m, dc5m, dc203m,
-                isExperimental, newPort, newPool, newCf, customCfDomainEnabled, customCfDomain, newSecret
+                isExperimental, newPort, newPool, 
+                newCf, newCfCustom, newCfDomain, 
+                newFakeTls, newFakeTlsDomain, newSecret
             )
         }
     }
@@ -214,18 +236,68 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Local Port", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey) },
+                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey) },
                             enabled = !isRunning, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant))
                     }
+                    
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+                    
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cloudflare Routing", style = MaterialTheme.typography.bodyLarge)
-                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
+                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
                     }
+                    
+                    // 🚀 Custom CF Routing Setup
+                    AnimatedVisibility(visible = savedCfEnabled) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("Custom Routing Domain", style = MaterialTheme.typography.bodyLarge)
+                                Switch(checked = savedCfCustomEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, it, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
+                            }
+                            AnimatedVisibility(visible = savedCfCustomEnabled) {
+                                OutlinedTextField(
+                                    value = cfDomainText,
+                                    onValueChange = { cfDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, it, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey) },
+                                    enabled = !isRunning,
+                                    label = { Text("Domain (e.g. proxy.example.com)", style = MaterialTheme.typography.labelMedium) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+                    }
+
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+
+                    // 🚀 FakeTLS (ee-secret) Setup
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("FakeTLS Camouflage", style = MaterialTheme.typography.bodyLarge)
+                            Switch(checked = savedFakeTlsEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, it, fakeTlsDomainText, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
+                        }
+                        AnimatedVisibility(visible = savedFakeTlsEnabled) {
+                            OutlinedTextField(
+                                value = fakeTlsDomainText,
+                                onValueChange = { fakeTlsDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, it, savedPoolSize, savedSecretKey) },
+                                enabled = !isRunning,
+                                label = { Text("TLS Sni Domain (e.g. bing.com)", style = MaterialTheme.typography.labelMedium) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+                    
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text("Connection Pool Size", style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(16.dp))
@@ -233,14 +305,16 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
                                 Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
-                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, size, savedSecretKey) },
+                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
                                 }
                             }
                         }
                     }
+                    
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+                    
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Proxy Secret", style = MaterialTheme.typography.bodyLarge)
@@ -248,12 +322,12 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus()
                                     val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-                                    saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret)
+                                    saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, newSecret)
                                 }.padding(8.dp))
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
-                            Text(text = secretForUrl, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            Text(text = fullSecretPrefix, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         }
                     }
                 }

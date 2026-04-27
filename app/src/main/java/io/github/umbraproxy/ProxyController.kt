@@ -13,6 +13,14 @@ object ProxyController {
         val portText = settingsStore.port.first()
         val port = portText.toIntOrNull()
         val cfEnabled = settingsStore.cfproxyEnabled.first()
+        
+        val customCfEnabled = settingsStore.customCfDomainEnabled.first()
+        val customCfDomainStr = settingsStore.customCfDomain.first()
+        val finalCfDomain = if (customCfEnabled && customCfDomainStr.isNotBlank()) customCfDomainStr else ""
+
+        val fakeTlsEnabled = settingsStore.fakeTlsEnabled.first()
+        val fakeTlsDomain = settingsStore.fakeTlsDomain.first()
+
         var secretKey = settingsStore.secretKey.first()
 
         if (secretKey.length != 32) {
@@ -30,6 +38,9 @@ object ProxyController {
         val intent = Intent(context, ProxyService::class.java).apply {
             putExtra("PORT", port)
             putExtra("CF_ENABLED", cfEnabled)
+            putExtra("CF_DOMAIN", finalCfDomain)
+            putExtra("FAKE_TLS_ENABLED", fakeTlsEnabled)
+            putExtra("FAKE_TLS_DOMAIN", fakeTlsDomain)
             putExtra("SECRET", secretKey)
         }
 

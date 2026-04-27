@@ -37,6 +37,8 @@ class SettingsStore(private val context: Context) {
         val CFPROXY_ENABLED = booleanPreferencesKey("cfproxy_enabled")
         val CUSTOM_CF_DOMAIN_ENABLED = booleanPreferencesKey("custom_cf_domain_enabled")
         val CUSTOM_CF_DOMAIN = stringPreferencesKey("custom_cf_domain")
+        val FAKE_TLS_ENABLED = booleanPreferencesKey("fake_tls_enabled")
+        val FAKE_TLS_DOMAIN = stringPreferencesKey("fake_tls_domain")
         val AUTO_START_ON_BOOT = booleanPreferencesKey("auto_start_on_boot")
         val SECRET_KEY = stringPreferencesKey("secret_key")
         val LOG_SHOW_DEBUG = booleanPreferencesKey("log_show_debug")
@@ -71,6 +73,8 @@ class SettingsStore(private val context: Context) {
     val cfproxyEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.CFPROXY_ENABLED] ?: true }
     val customCfDomainEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.CUSTOM_CF_DOMAIN_ENABLED] ?: false }
     val customCfDomain: Flow<String> = context.dataStore.data.map { it[Keys.CUSTOM_CF_DOMAIN] ?: "" }
+    val fakeTlsEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.FAKE_TLS_ENABLED] ?: false }
+    val fakeTlsDomain: Flow<String> = context.dataStore.data.map { it[Keys.FAKE_TLS_DOMAIN] ?: "" }
     val autoStartOnBoot: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_START_ON_BOOT] ?: false }
     val secretKey: Flow<String> = context.dataStore.data.map { it[Keys.SECRET_KEY] ?: "" }
 
@@ -113,7 +117,8 @@ class SettingsStore(private val context: Context) {
     suspend fun saveAll(isDcAuto: Boolean, dc1: String, dc2: String, dc3: String, dc4: String, dc5: String, dc203: String,
                         dc1m: String, dc2m: String, dc3m: String, dc4m: String, dc5m: String, dc203m: String,
                         isExperimental: Boolean, port: String, poolSize: Int,
-                        cfproxyEnabled: Boolean, customCfDomainEnabled: Boolean, customCfDomain: String, secretKey: String) {
+                        cfproxyEnabled: Boolean, customCfDomainEnabled: Boolean, customCfDomain: String,
+                        fakeTlsEnabled: Boolean, fakeTlsDomain: String, secretKey: String) {
         context.dataStore.edit {
             it[Keys.IS_DC_AUTO] = isDcAuto
             it[Keys.DC1] = dc1
@@ -134,6 +139,8 @@ class SettingsStore(private val context: Context) {
             it[Keys.CFPROXY_ENABLED] = cfproxyEnabled
             it[Keys.CUSTOM_CF_DOMAIN_ENABLED] = customCfDomainEnabled
             it[Keys.CUSTOM_CF_DOMAIN] = customCfDomain
+            it[Keys.FAKE_TLS_ENABLED] = fakeTlsEnabled
+            it[Keys.FAKE_TLS_DOMAIN] = fakeTlsDomain
             if(secretKey.isNotBlank()) {
                 it[Keys.SECRET_KEY] = secretKey
             }

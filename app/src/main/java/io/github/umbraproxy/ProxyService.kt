@@ -63,12 +63,15 @@ class ProxyService : Service() {
 
         val port = intent?.getIntExtra("PORT", 1443) ?: 1443
         val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
+        val cfDomain = intent?.getStringExtra("CF_DOMAIN") ?: ""
+        val fakeTlsEnabled = intent?.getBooleanExtra("FAKE_TLS_ENABLED", false) ?: false
+        val fakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
         val secret = intent?.getStringExtra("SECRET") ?: ""
 
         startForeground(NOTIFICATION_ID, createNotification("Starting UmbraProxy..."))
 
         CoroutineScope(Dispatchers.IO).launch {
-            val success = NativeProxy.startProxy(port, cfEnabled, secret)
+            val success = NativeProxy.startProxy(port, cfEnabled, cfDomain, fakeTlsEnabled, fakeTlsDomain, secret)
             withContext(Dispatchers.Main) {
                 if (success) {
                     updateState(true)

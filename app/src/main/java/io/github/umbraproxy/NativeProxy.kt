@@ -17,6 +17,8 @@ interface ProxyLibrary : Library {
     fun StopProxy(): Int
     fun SetPoolSize(size: Int)
     fun SetCfProxyConfig(enabled: Int, priority: Int, userDomain: String)
+    fun SetFakeTls(enabled: Int, domain: String)
+    fun SetSecret(secret: String)
     fun GetSecretWithPrefix(): Pointer?
     fun GetStats(): Pointer?
     fun FreeString(p: Pointer)
@@ -24,9 +26,18 @@ interface ProxyLibrary : Library {
 
 object NativeProxy {
 
-    fun startProxy(port: Int, cfEnabled: Boolean, secret: String): Boolean {
+    fun updateConfigForSecret(secret: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String) {
+        runCatching {
+            // Update the core state so GetSecretWithPrefix() returns the correct URL payload
+            ProxyLibrary.INSTANCE.SetSecret(secret)
+            ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
+        }
+    }
+
+    fun startProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String): Boolean {
         return try {
-            ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, "")
+            ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, cfDomain)
+            ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
             val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, "", secret, 0)
             result == 0
         } catch (e: Throwable) {
