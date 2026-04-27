@@ -30,6 +30,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +41,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,6 +54,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -119,12 +124,17 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
     var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
 
+    var showLogsSheet by rememberSaveable { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
     LaunchedEffect(isReady) {
         if (isReady) {
+            // Start the background log observer
+            LogManager.startLogging()
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -185,6 +195,10 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     var isStarting by remember { mutableStateOf(false) }
     LaunchedEffect(isRunning) { if (isRunning || !isRunning) { delay(600); isStarting = false } }
 
+    if (showLogsSheet) {
+        LogsBottomSheet(onDismiss = { showLogsSheet = false })
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
     ) { innerPadding ->
@@ -192,7 +206,16 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
             modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = { showLogsSheet = true }) {
+                    Icon(Icons.Default.Terminal, contentDescription = "View Logs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             
             MainConnectionToggle(isRunning = isRunning, isStarting = isStarting, onClick = {
                 focusManager.clearFocus()
@@ -357,6 +380,78 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { context.startActivity(intent) } catch (e: Exception) {}
                 }.padding(vertical = 18.dp, horizontal = 8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LogsBottomSheet(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val logs by LogManager.logs.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+
+    // Auto-scroll to the bottom when new logs arrive
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            listState.animateScrollToItem(logs.size - 1)
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0A0A0A), // Deep black background for terminal feel
+        contentColor = Color.White
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("System Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "CLEAR", 
+                        style = MaterialTheme.typography.labelMedium, 
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { LogManager.clearLogs() }.padding(8.dp)
+                    )
+                    Text(
+                        text = "COPY", 
+                        style = MaterialTheme.typography.labelMedium, 
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val text = logs.joinToString("\n") { it.message }
+                            cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
+                            Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
+                        }.padding(8.dp)
+                    )
+                }
+            }
+            HorizontalDivider(color = Color.DarkGray)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(top = 8.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(logs) { log ->
+                    val color = when (log.level) {
+                        LogLevel.INFO -> Color(0xFF4CAF50) // Green
+                        LogLevel.WARN -> Color(0xFFFFC107) // Amber
+                        LogLevel.ERROR -> Color(0xFFF44336) // Red
+                        LogLevel.DEBUG -> Color(0xFF9E9E9E) // Grey
+                        LogLevel.UNKNOWN -> Color.White
+                    }
+                    Text(
+                        text = log.message,
+                        color = color,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
         }
     }
 }
