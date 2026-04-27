@@ -1,5 +1,21 @@
 # Add project specific ProGuard rules here.
 
+# ─── Aggressive Optimizations (Battery & Memory Efficiency) ───
+-optimizationpasses 5
+-allowaccessmodification
+-mergeinterfacesaggressively
+-repackageclasses ''
+
+# 🚀 Strip all Logs from Production Build (Saves CPU cycles and battery)
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int i(...);
+    public static int w(...);
+    public static int d(...);
+    public static int e(...);
+}
+
 # ─── JNA ───
 -dontwarn java.awt.**
 -dontwarn java.beans.**
@@ -15,7 +31,7 @@
 -keep class * implements com.sun.jna.Callback { *; }
 -keep class * extends com.sun.jna.Structure { *; }
 
-# ─── Our proxy library interface and NativeProxy object (Updated for UmbraProxy) ───
+# ─── Our proxy library interface and NativeProxy object ───
 -keep class io.github.umbraproxy.NativeProxy { *; }
 -keep interface io.github.umbraproxy.ProxyLibrary { *; }
 -keepclassmembers class * extends com.sun.jna.Library {
