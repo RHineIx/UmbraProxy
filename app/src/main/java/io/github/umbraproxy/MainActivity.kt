@@ -95,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         onOpenLogs = { showLogsScreen = true }
                     )
 
-                    
+                    // Full-Screen Logs Overlay
                     AnimatedVisibility(
                         visible = showLogsScreen,
                         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -128,7 +128,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val savedPoolSize by settingsStore.poolSize.collectAsStateWithLifecycle(initialValue = 4)
     val savedSecretKey by settingsStore.secretKey.collectAsStateWithLifecycle(initialValue = "")
 
-    val isDcAuto by settingsStore.isDcAuto.collectAsStateWithLifecycle(initialValue = true)
+    val savedIsDcAuto by settingsStore.isDcAuto.collectAsStateWithLifecycle(initialValue = true)
     val dc1 by settingsStore.dc1.collectAsStateWithLifecycle(initialValue = "")
     val savedDc2 by settingsStore.dc2.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC2_IP)
     val dc3 by settingsStore.dc3.collectAsStateWithLifecycle(initialValue = "")
@@ -152,6 +152,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
     var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
     
+    var isDcAuto by rememberSaveable(savedIsDcAuto) { mutableStateOf(savedIsDcAuto) }
     var dc2Text by rememberSaveable(savedDc2) { mutableStateOf(savedDc2) }
     var dc4Text by rememberSaveable(savedDc4) { mutableStateOf(savedDc4) }
     var isAdvancedExpanded by rememberSaveable { mutableStateOf(false) }
@@ -162,7 +163,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
     LaunchedEffect(isReady) {
         if (isReady) {
-            
             LogManager.startLogging()
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -197,7 +197,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val secretForUrl = if (savedSecretKey.isNotBlank()) savedSecretKey else "00000000000000000000000000000000"
     var fullSecretPrefix by remember { mutableStateOf("dd$secretForUrl") }
 
-    
     LaunchedEffect(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain) {
         withContext(Dispatchers.IO) {
             NativeProxy.updateConfigForSecret(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain)
@@ -210,10 +209,10 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
     val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=$fullSecretPrefix"
 
-    val saveSettings = { newPort: String, newCf: Boolean, newCfCustom: Boolean, newCfDomain: String, newFakeTls: Boolean, newFakeTlsDomain: String, newPool: Int, newSecret: String, newDc2: String, newDc4: String ->
+    val saveSettings = { newPort: String, newCf: Boolean, newCfCustom: Boolean, newCfDomain: String, newFakeTls: Boolean, newFakeTlsDomain: String, newPool: Int, newSecret: String, newDcAuto: Boolean, newDc2: String, newDc4: String ->
         scope.launch {
             settingsStore.saveAll(
-                isDcAuto, dc1, newDc2, dc3, newDc4, dc5, dc203,
+                newDcAuto, dc1, newDc2, dc3, newDc4, dc5, dc203,
                 dc1m, dc2m, dc3m, dc4m, dc5m, dc203m,
                 isExperimental, newPort, newPool, 
                 newCf, newCfCustom, newCfDomain, 
@@ -256,7 +255,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             Text(text = when { isStarting -> "Connecting..."; isRunning -> "Connected & Secured"; else -> "System Standby" },
                 style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             
-            
             AnimatedVisibility(
                 visible = isRunning,
                 enter = fadeIn() + expandVertically(),
@@ -285,7 +283,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Local Port", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, dc4Text) },
+                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                             enabled = !isRunning, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
@@ -296,20 +294,19 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cloudflare Routing", style = MaterialTheme.typography.bodyLarge)
-                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, dc4Text) }, enabled = !isRunning)
+                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                     }
-                    
                     
                     AnimatedVisibility(visible = savedCfEnabled) {
                         Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text("Custom Routing Domain", style = MaterialTheme.typography.bodyLarge)
-                                Switch(checked = savedCfCustomEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, it, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, dc4Text) }, enabled = !isRunning)
+                                Switch(checked = savedCfCustomEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, it, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                             }
                             AnimatedVisibility(visible = savedCfCustomEnabled) {
                                 OutlinedTextField(
                                     value = cfDomainText,
-                                    onValueChange = { cfDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, it, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, dc4Text) },
+                                    onValueChange = { cfDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, it, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                     enabled = !isRunning,
                                     label = { Text("Domain (e.g. proxy.example.com)", style = MaterialTheme.typography.labelMedium) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
@@ -324,16 +321,15 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
 
-                    
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("FakeTLS Camouflage", style = MaterialTheme.typography.bodyLarge)
-                            Switch(checked = savedFakeTlsEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, it, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, dc4Text) }, enabled = !isRunning)
+                            Switch(checked = savedFakeTlsEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, it, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                         }
                         AnimatedVisibility(visible = savedFakeTlsEnabled) {
                             OutlinedTextField(
                                 value = fakeTlsDomainText,
-                                onValueChange = { fakeTlsDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, it, savedPoolSize, savedSecretKey, dc2Text, dc4Text) },
+                                onValueChange = { fakeTlsDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, it, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                 enabled = !isRunning,
                                 label = { Text("TLS Sni Domain (e.g. bing.com)", style = MaterialTheme.typography.labelMedium) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
@@ -347,7 +343,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
                     
-                    
+                    // 🚀 Advanced: Direct DC IPs Setup (Now with Auto DC Switch)
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().clickable(enabled = !isRunning) { isAdvancedExpanded = !isAdvancedExpanded }.padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Advanced: Direct DC IPs", style = MaterialTheme.typography.bodyLarge)
@@ -359,28 +355,38 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         }
                         AnimatedVisibility(visible = isAdvancedExpanded) {
                             Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                                OutlinedTextField(
-                                    value = dc2Text,
-                                    onValueChange = { dc2Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, it, dc4Text) },
-                                    enabled = !isRunning,
-                                    label = { Text("DC2 IP Address", style = MaterialTheme.typography.labelMedium) },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = dc4Text,
-                                    onValueChange = { dc4Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, dc2Text, it) },
-                                    enabled = !isRunning,
-                                    label = { Text("DC4 IP Address", style = MaterialTheme.typography.labelMedium) },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Auto Routing (Skip Hardcoded IPs)", style = MaterialTheme.typography.bodyMedium)
+                                    Switch(checked = isDcAuto, onCheckedChange = { isDcAuto = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, it, dc2Text, dc4Text) }, enabled = !isRunning, modifier = Modifier.scale(0.85f))
+                                }
+                                
+                                AnimatedVisibility(visible = !isDcAuto) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedTextField(
+                                            value = dc2Text,
+                                            onValueChange = { dc2Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, it, dc4Text) },
+                                            enabled = !isRunning,
+                                            label = { Text("DC2 IP Address", style = MaterialTheme.typography.labelMedium) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedTextField(
+                                            value = dc4Text,
+                                            onValueChange = { dc4Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, it) },
+                                            enabled = !isRunning,
+                                            label = { Text("DC4 IP Address", style = MaterialTheme.typography.labelMedium) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Done),
+                                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -394,7 +400,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
                                 Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
-                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey, dc2Text, dc4Text) },
+                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
                                 }
@@ -411,7 +417,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus()
                                     val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-                                    saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, newSecret, dc2Text, dc4Text)
+                                    saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, newSecret, isDcAuto, dc2Text, dc4Text)
                                 }.padding(8.dp))
                         }
                         Spacer(modifier = Modifier.height(12.dp))
@@ -459,13 +465,12 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
-    
+    // Filter states
     val showInfo by settingsStore.logShowInfo.collectAsStateWithLifecycle(initialValue = true)
     val showError by settingsStore.logShowError.collectAsStateWithLifecycle(initialValue = true)
     val showDebug by settingsStore.logShowDebug.collectAsStateWithLifecycle(initialValue = true)
     val showNull by settingsStore.logShowNull.collectAsStateWithLifecycle(initialValue = true)
 
-    
     val filteredLogs by remember {
         derivedStateOf {
             logs.filter { log ->
@@ -482,7 +487,6 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
 
     BackHandler { onBack() }
 
-    
     LaunchedEffect(filteredLogs.size) {
         if (filteredLogs.isNotEmpty()) {
             listState.animateScrollToItem(filteredLogs.size - 1)
@@ -502,7 +506,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                     actions = {
                         IconButton(onClick = {
                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val text = filteredLogs.joinToString("\n") { it.message }
+                            val text = filteredLogs.joinToString("\n") { if (it.count > 1) "${it.message} (x${it.count})" else it.message }
                             cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
                             Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
                         }) {
@@ -514,69 +518,28 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF121212))
                 )
-                
                 LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF121212))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF121212)).padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    item {
-                        FilterChip(
-                            selected = showInfo,
-                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } },
-                            label = { Text("INFO") },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF2E7D32), selectedLabelColor = Color.White)
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = showError,
-                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } },
-                            label = { Text("ERROR") },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFFB71C1C), selectedLabelColor = Color.White)
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = showDebug,
-                            onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } },
-                            label = { Text("DEBUG") },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF37474F), selectedLabelColor = Color.White)
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = showNull,
-                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } },
-                            label = { Text("NULL") },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF424242), selectedLabelColor = Color.White)
-                        )
-                    }
+                    item { FilterChip(selected = showInfo, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } }, label = { Text("INFO") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF2E7D32), selectedLabelColor = Color.White)) }
+                    item { FilterChip(selected = showError, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } }, label = { Text("ERROR") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFFB71C1C), selectedLabelColor = Color.White)) }
+                    item { FilterChip(selected = showDebug, onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } }, label = { Text("DEBUG") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF37474F), selectedLabelColor = Color.White)) }
+                    item { FilterChip(selected = showNull, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } }, label = { Text("NULL") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF424242), selectedLabelColor = Color.White)) }
                 }
             }
         },
-        containerColor = Color.Black 
+        containerColor = Color.Black
     ) { innerPadding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(filteredLogs) { log ->
                 val textColor = if (log.level == LogLevel.ERROR) Color(0xFFFF5252) else Color(0xFF4CAF50)
-                
-                Text(
-                    text = log.message,
-                    color = textColor,
-                    fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                val textOutput = if (log.count > 1) "${log.message} (x${log.count})" else log.message
+                Text(text = textOutput, color = textColor, fontSize = 13.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth())
             }
         }
     }

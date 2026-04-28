@@ -21,10 +21,14 @@ object ProxyController {
         val fakeTlsEnabled = settingsStore.fakeTlsEnabled.first()
         val fakeTlsDomain = settingsStore.fakeTlsDomain.first()
 
-        val dc2 = settingsStore.dc2.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC2_IP
-        val dc4 = settingsStore.dc4.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC4_IP
-        
-        val dcIps = "2:$dc2,-2:$dc2,4:$dc4,-4:$dc4"
+        val isDcAuto = settingsStore.isDcAuto.first()
+        val dcIps = if (isDcAuto) {
+            "" 
+        } else {
+            val dc2 = settingsStore.dc2.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC2_IP
+            val dc4 = settingsStore.dc4.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC4_IP
+            "2:$dc2,-2:$dc2,4:$dc4,-4:$dc4"
+        }
 
         var secretKey = settingsStore.secretKey.first()
 
