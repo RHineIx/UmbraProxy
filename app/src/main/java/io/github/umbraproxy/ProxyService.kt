@@ -35,8 +35,6 @@ class ProxyService : Service() {
     companion object {
         private const val CHANNEL_ID = "UmbraProxyCore"
         private const val NOTIFICATION_ID = 101
-        
-        // 🚀 WakeLock limits to bypass aggressive OEM killing
         private const val WAKELOCK_TIMEOUT_MS = 30L * 60 * 1000
         private const val WAKELOCK_REFRESH_MS = 25L * 60 * 1000
 
@@ -73,7 +71,7 @@ class ProxyService : Service() {
         val secret = intent?.getStringExtra("SECRET") ?: ""
         val dcIps = intent?.getStringExtra("DC_IPS") ?: ""
 
-        startForeground(NOTIFICATION_ID, createNotification("Starting UmbraProxy..."))
+        startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting)))
         acquireWakeLock()
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -95,7 +93,6 @@ class ProxyService : Service() {
         watchdogJob?.cancel()
         statsUpdateJob?.cancel()
         
-        // 🚀 Watchdog: Verify the socket is actually open and bound successfully
         watchdogJob = serviceScope.launch {
             delay(3000)
             if (_isRunning.value) {
@@ -108,13 +105,12 @@ class ProxyService : Service() {
                     } catch (e: Exception) { false }
                 }
                 if (!isListening) {
-                    updateNotification("⚠️ Proxy Core Unresponsive")
+                    updateNotification(getString(R.string.core_unresponsive))
                 }
             }
         }
 
         statsUpdateJob = serviceScope.launch {
-            // 🚀 WakeLock refresher job (Keeps service alive 24/7 on Xiaomi/Samsung)
             launch {
                 while (isActive) {
                     delay(WAKELOCK_REFRESH_MS)
@@ -130,7 +126,7 @@ class ProxyService : Service() {
                     val down = extractValue(rawStats, "down=")
 
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
-                    updateNotification("Sessions: $sessions  •  Down: $down  •  Up: $up")
+                    updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
                 }
                 delay(2000) 
             }
@@ -156,14 +152,14 @@ class ProxyService : Service() {
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("UmbraProxy")
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_secure)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
-            .addAction(0, "Disconnect", stopPendingIntent)
+            .addAction(0, getString(R.string.action_disconnect), stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
@@ -173,8 +169,7 @@ class ProxyService : Service() {
         watchdogJob?.cancel()
         
         serviceScope.launch {
-            updateNotification("Shutting down...")
-            // 🚀 Graceful native stop via IO thread to prevent UI freezing
+            updateNotification(getString(R.string.service_stopping))
             withContext(Dispatchers.IO) {
                 NativeProxy.stopProxy()
             }
@@ -193,7 +188,6 @@ class ProxyService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // 🚀 Task removal protection
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         if (_isRunning.value) {
