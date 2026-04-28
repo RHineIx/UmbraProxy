@@ -1,3 +1,43 @@
 <resources>
     <string name="app_name">UmbraProxy</string>
+
+    <string name="status_connecting">Connecting...</string>
+    <string name="status_connected">Connected &amp; Secured</string>
+    <string name="status_standby">System Standby</string>
+    <string name="service_starting">Starting UmbraProxy...</string>
+    <string name="service_stopping">Shutting down...</string>
+    <string name="core_unresponsive">⚠️ Proxy Core Unresponsive</string>
+
+    <string name="stat_sessions">Sessions</string>
+    <string name="stat_down">Down</string>
+    <string name="stat_up">Up</string>
+
+    <string name="label_local_port">Local Port</string>
+    <string name="label_cf_routing">Cloudflare Routing</string>
+    <string name="label_custom_domain">Custom Routing Domain</string>
+    <string name="label_domain_hint">Domain (e.g. proxy.example.com)</string>
+    <string name="label_fake_tls">FakeTLS Camouflage</string>
+    <string name="label_tls_hint">TLS Sni Domain (e.g. bing.com)</string>
+    <string name="label_advanced_dc">Advanced: Direct DC IPs</string>
+    <string name="label_auto_routing">Auto Routing (Skip Hardcoded IPs)</string>
+    <string name="label_dc2_hint">DC2 IP Address</string>
+    <string name="label_dc4_hint">DC4 IP Address</string>
+    <string name="label_pool_size">Connection Pool Size</string>
+    <string name="label_proxy_secret">Proxy Secret</string>
+    <string name="btn_generate">GENERATE</string>
+    <string name="btn_launch_telegram">Launch Telegram</string>
+
+    <string name="tooltip_view_logs">View Logs</string>
+    <string name="title_system_logs">System Logs</string>
+    <string name="btn_clear_logs">Clear Logs</string>
+    <string name="msg_logs_copied">Logs copied</string>
+    <string name="msg_copied_clipboard">Copied to clipboard</string>
+    <string name="msg_tg_not_installed">Telegram not installed</string>
+
+    <string name="qs_prompt_title">Quick Access Shortcut</string>
+    <string name="qs_prompt_desc">Would you like to add a quick toggle to your notification panel for easier access to the proxy?</string>
+    <string name="btn_add">Add</string>
+    <string name="btn_later">Later</string>
+
+    <string name="action_disconnect">Disconnect</string>
 </resources>

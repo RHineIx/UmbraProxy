@@ -2,11 +2,14 @@ package io.github.umbraproxy
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.StatusBarManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon as AndroidIcon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +17,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,11 +29,17 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +47,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,17 +65,23 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.umbraproxy.ui.FloatingToolbar
 import io.github.umbraproxy.ui.UmbraProxyTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -70,8 +91,38 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val settingsStore = remember { SettingsStore(context) }
-            UmbraProxyTheme {
-                UmbraMainScreen(settingsStore)
+            val scope = rememberCoroutineScope()
+
+            val themeMode by settingsStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
+            val isDynamicColor by settingsStore.isDynamicColor.collectAsStateWithLifecycle(initialValue = false)
+
+            var showLogsScreen by rememberSaveable { mutableStateOf(false) }
+
+            UmbraProxyTheme(themeMode = themeMode, dynamicColor = isDynamicColor) {
+                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    UmbraMainScreen(
+                        settingsStore = settingsStore,
+                        onOpenLogs = { showLogsScreen = true }
+                    )
+
+                    FloatingToolbar(
+                        currentTheme = themeMode,
+                        onThemeChange = { mode -> scope.launch { settingsStore.saveThemeMode(mode) } },
+                        isDynamicColor = isDynamicColor,
+                        onDynamicColorChange = { dc -> scope.launch { settingsStore.saveDynamicColor(dc) } }
+                    )
+
+                    AnimatedVisibility(
+                        visible = showLogsScreen,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        LogsScreen(
+                            settingsStore = settingsStore,
+                            onBack = { showLogsScreen = false }
+                        )
+                    }
+                }
             }
         }
     }
@@ -79,11 +130,11 @@ class MainActivity : ComponentActivity() {
 
 @SuppressLint("BatteryLife")
 @Composable
-fun UmbraMainScreen(settingsStore: SettingsStore) {
+fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-    
+
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
@@ -93,31 +144,42 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     val savedPoolSize by settingsStore.poolSize.collectAsStateWithLifecycle(initialValue = 4)
     val savedSecretKey by settingsStore.secretKey.collectAsStateWithLifecycle(initialValue = "")
 
-    val isDcAuto by settingsStore.isDcAuto.collectAsStateWithLifecycle(initialValue = true)
+    val savedIsDcAuto by settingsStore.isDcAuto.collectAsStateWithLifecycle(initialValue = true)
     val dc1 by settingsStore.dc1.collectAsStateWithLifecycle(initialValue = "")
-    val dc2 by settingsStore.dc2.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC2_IP)
-    val dc3 by settingsStore.dc3.collectAsStateWithLifecycle(initialValue = "")
-    val dc4 by settingsStore.dc4.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC4_IP)
-    val dc5 by settingsStore.dc5.collectAsStateWithLifecycle(initialValue = "")
-    val dc203 by settingsStore.dc203.collectAsStateWithLifecycle(initialValue = "")
-    val dc1m by settingsStore.dc1m.collectAsStateWithLifecycle(initialValue = "")
-    val dc2m by settingsStore.dc2m.collectAsStateWithLifecycle(initialValue = "")
-    val dc3m by settingsStore.dc3m.collectAsStateWithLifecycle(initialValue = "")
-    val dc4m by settingsStore.dc4m.collectAsStateWithLifecycle(initialValue = "")
-    val dc5m by settingsStore.dc5m.collectAsStateWithLifecycle(initialValue = "")
-    val dc203m by settingsStore.dc203m.collectAsStateWithLifecycle(initialValue = "")
+    val savedDc2 by settingsStore.dc2.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC2_IP)
+    val savedDc4 by settingsStore.dc4.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC4_IP)
     val isExperimental by settingsStore.isExperimentalMode.collectAsStateWithLifecycle(initialValue = false)
-    val customCfDomainEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
-    val customCfDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
+
+    val savedCfCustomEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val savedCfCustomDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
+    val savedFakeTlsEnabled by settingsStore.fakeTlsEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val savedFakeTlsDomain by settingsStore.fakeTlsDomain.collectAsStateWithLifecycle(initialValue = "")
+
+    val appLaunchCount by settingsStore.appLaunchCount.collectAsStateWithLifecycle(initialValue = 0)
+    val qsPromptShown by settingsStore.qsTilePromptShown.collectAsStateWithLifecycle(initialValue = false)
+    var showQsDialog by rememberSaveable { mutableStateOf(false) }
 
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
+    var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
+    var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
+
+    var isDcAuto by rememberSaveable(savedIsDcAuto) { mutableStateOf(savedIsDcAuto) }
+    var dc2Text by rememberSaveable(savedDc2) { mutableStateOf(savedDc2) }
+    var dc4Text by rememberSaveable(savedDc4) { mutableStateOf(savedDc4) }
+    var isAdvancedExpanded by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
+    LaunchedEffect(Unit) {
+        settingsStore.incrementLaunchCount()
+    }
+
     LaunchedEffect(isReady) {
         if (isReady) {
+            LogManager.startLogging()
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -128,7 +190,15 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
-                context.startActivity(intent)
+                try { context.startActivity(intent) } catch (e: Exception) {}
+            }
+        }
+    }
+
+    LaunchedEffect(appLaunchCount, qsPromptShown) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (appLaunchCount >= 3 && !qsPromptShown) {
+                showQsDialog = true
             }
         }
     }
@@ -148,14 +218,28 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     }
 
     val secretForUrl = if (savedSecretKey.isNotBlank()) savedSecretKey else "00000000000000000000000000000000"
-    val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=dd$secretForUrl"
+    var fullSecretPrefix by remember { mutableStateOf("dd$secretForUrl") }
 
-    val saveSettings = { newPort: String, newCf: Boolean, newPool: Int, newSecret: String ->
+    LaunchedEffect(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain) {
+        withContext(Dispatchers.IO) {
+            NativeProxy.updateConfigForSecret(secretForUrl, savedFakeTlsEnabled, savedFakeTlsDomain)
+            val generatedSecret = NativeProxy.getSecretWithPrefix()
+            if (generatedSecret != null) {
+                fullSecretPrefix = generatedSecret
+            }
+        }
+    }
+
+    val proxyUrl = "https://t.me/proxy?server=127.0.0.1&port=$savedPort&secret=$fullSecretPrefix"
+
+    val saveSettings = { newPort: String, newCf: Boolean, newCfCustom: Boolean, newCfDomain: String, newFakeTls: Boolean, newFakeTlsDomain: String, newPool: Int, newSecret: String, newDcAuto: Boolean, newDc2: String, newDc4: String ->
         scope.launch {
             settingsStore.saveAll(
-                isDcAuto, dc1, dc2, dc3, dc4, dc5, dc203,
-                dc1m, dc2m, dc3m, dc4m, dc5m, dc203m,
-                isExperimental, newPort, newPool, newCf, customCfDomainEnabled, customCfDomain, newSecret
+                newDcAuto, dc1, newDc2, "", newDc4, "", "",
+                "", "", "", "", "", "",
+                isExperimental, newPort, newPool,
+                newCf, newCfCustom, newCfDomain,
+                newFakeTls, newFakeTlsDomain, newSecret
             )
         }
     }
@@ -163,15 +247,62 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
     var isStarting by remember { mutableStateOf(false) }
     LaunchedEffect(isRunning) { if (isRunning || !isRunning) { delay(600); isStarting = false } }
 
+    if (showQsDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showQsDialog = false
+                scope.launch { settingsStore.markQsTilePromptShown() }
+            },
+            title = { Text(stringResource(R.string.qs_prompt_title), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.qs_prompt_desc)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showQsDialog = false
+                    scope.launch { settingsStore.markQsTilePromptShown() }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val statusBarManager = context.getSystemService(StatusBarManager::class.java)
+                        val componentName = ComponentName(context, ProxyTileService::class.java)
+                        statusBarManager.requestAddTileService(
+                            componentName,
+                            context.getString(R.string.app_name), // 🚀 FIXED: Extracted safely using context
+                            AndroidIcon.createWithResource(context, R.drawable.tile),
+                            context.mainExecutor
+                        ) {}
+                    }
+                }) {
+                    Text(stringResource(R.string.btn_add), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showQsDialog = false
+                    scope.launch { settingsStore.markQsTilePromptShown() }
+                }) {
+                    Text(stringResource(R.string.btn_later), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
     Scaffold(
+        containerColor = Color.Transparent,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
     ) { innerPadding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
-            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = onOpenLogs) {
+                    Icon(Icons.Default.Terminal, contentDescription = stringResource(R.string.tooltip_view_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             MainConnectionToggle(isRunning = isRunning, isStarting = isStarting, onClick = {
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
@@ -180,12 +311,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     scope.launch { ProxyController.startFromSavedSettings(context, true) }
                 }
             })
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            Text(text = when { isStarting -> "Connecting..."; isRunning -> "Connected & Secured"; else -> "System Standby" },
+            Text(text = when { isStarting -> stringResource(R.string.status_connecting); isRunning -> stringResource(R.string.status_connected); else -> stringResource(R.string.status_standby) },
                 style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            
-            // 🚀 Real-time Stats Display Area
+
             AnimatedVisibility(
                 visible = isRunning,
                 enter = fadeIn() + expandVertically(),
@@ -201,11 +331,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatItem("Sessions", liveStats.sessions)
+                    StatItem(stringResource(R.string.stat_sessions), liveStats.sessions)
                     StatDivider()
-                    StatItem("Down", liveStats.down)
+                    StatItem(stringResource(R.string.stat_down), liveStats.down)
                     StatDivider()
-                    StatItem("Up", liveStats.up)
+                    StatItem(stringResource(R.string.stat_up), liveStats.up)
                 }
             }
 
@@ -213,47 +343,126 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
             ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Local Port", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedPoolSize, savedSecretKey) },
+                        Text(stringResource(R.string.label_local_port), style = MaterialTheme.typography.bodyLarge)
+                        OutlinedTextField(value = portText, onValueChange = { portText = it; saveSettings(it, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                             enabled = !isRunning, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant))
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp))
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Cloudflare Routing", style = MaterialTheme.typography.bodyLarge)
-                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedPoolSize, savedSecretKey) }, enabled = !isRunning)
+                        Text(stringResource(R.string.label_cf_routing), style = MaterialTheme.typography.bodyLarge)
+                        Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+
+                    AnimatedVisibility(visible = savedCfEnabled) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.label_custom_domain), style = MaterialTheme.typography.bodyLarge)
+                                Switch(checked = savedCfCustomEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, it, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
+                            }
+                            AnimatedVisibility(visible = savedCfCustomEnabled) {
+                                OutlinedTextField(
+                                    value = cfDomainText,
+                                    onValueChange = { cfDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, it, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
+                                    enabled = !isRunning,
+                                    label = { Text(stringResource(R.string.label_domain_hint), style = MaterialTheme.typography.labelMedium) },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text("Connection Pool Size", style = MaterialTheme.typography.bodyLarge)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.label_fake_tls), style = MaterialTheme.typography.bodyLarge)
+                            Switch(checked = savedFakeTlsEnabled, onCheckedChange = { saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, it, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
+                        }
+                        AnimatedVisibility(visible = savedFakeTlsEnabled) {
+                            OutlinedTextField(
+                                value = fakeTlsDomainText,
+                                onValueChange = { fakeTlsDomainText = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, it, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
+                                enabled = !isRunning,
+                                label = { Text(stringResource(R.string.label_tls_hint), style = MaterialTheme.typography.labelMedium) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth().clickable(enabled = !isRunning) { isAdvancedExpanded = !isAdvancedExpanded }.padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.label_advanced_dc), style = MaterialTheme.typography.bodyLarge)
+                            Icon(imageVector = if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                        AnimatedVisibility(visible = isAdvancedExpanded) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(stringResource(R.string.label_auto_routing), style = MaterialTheme.typography.bodyMedium)
+                                    Switch(checked = isDcAuto, onCheckedChange = { isDcAuto = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, it, dc2Text, dc4Text) }, enabled = !isRunning, modifier = Modifier.scale(0.85f))
+                                }
+
+                                AnimatedVisibility(visible = !isDcAuto) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedTextField(value = dc2Text, onValueChange = { dc2Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, it, dc4Text) },
+                                            enabled = !isRunning, label = { Text(stringResource(R.string.label_dc2_hint), style = MaterialTheme.typography.labelMedium) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(12.dp))
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedTextField(value = dc4Text, onValueChange = { dc4Text = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, it) },
+                                            enabled = !isRunning, label = { Text(stringResource(R.string.label_dc4_hint), style = MaterialTheme.typography.labelMedium) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(12.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.label_pool_size), style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(16.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
-                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
-                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, size, savedSecretKey) },
+                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) {
+                                    focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
                                 }
                             }
                         }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Proxy Secret", style = MaterialTheme.typography.bodyLarge)
-                            Text(text = "GENERATE", style = MaterialTheme.typography.labelMedium, color = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold,
+                            Text(stringResource(R.string.label_proxy_secret), style = MaterialTheme.typography.bodyLarge)
+                            Text(text = stringResource(R.string.btn_generate), style = MaterialTheme.typography.labelMedium, color = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold,
                                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus()
                                     val newSecret = UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-                                    saveSettings(portText, savedCfEnabled, savedPoolSize, newSecret)
+                                    saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, newSecret, isDcAuto, dc2Text, dc4Text)
                                 }.padding(8.dp))
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
-                            Text(text = secretForUrl, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            Text(text = fullSecretPrefix, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                         }
                     }
                 }
@@ -263,17 +472,17 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                 FilledTonalButton(onClick = {
                     val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cb.setPrimaryClip(ClipData.newPlainText("Proxy", proxyUrl))
-                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.msg_copied_clipboard), Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(16.dp)) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
                 Button(onClick = {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(proxyUrl))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    try { context.startActivity(intent) } catch (e: Exception) { Toast.makeText(context, "Telegram not installed", Toast.LENGTH_SHORT).show() }
+                    try { context.startActivity(intent) } catch (e: Exception) { Toast.makeText(context, context.getString(R.string.msg_tg_not_installed), Toast.LENGTH_SHORT).show() }
                 }, enabled = isRunning, modifier = Modifier.weight(3f).height(56.dp), shape = RoundedCornerShape(16.dp)) {
                     Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(12.dp)); Text("Launch Telegram", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.btn_launch_telegram), style = MaterialTheme.typography.titleMedium)
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
@@ -283,6 +492,97 @@ fun UmbraMainScreen(settingsStore: SettingsStore) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { context.startActivity(intent) } catch (e: Exception) {}
                 }.padding(vertical = 18.dp, horizontal = 8.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val logs by LogManager.logs.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+
+    val showInfo by settingsStore.logShowInfo.collectAsStateWithLifecycle(initialValue = true)
+    val showError by settingsStore.logShowError.collectAsStateWithLifecycle(initialValue = true)
+    val showDebug by settingsStore.logShowDebug.collectAsStateWithLifecycle(initialValue = true)
+    val showNull by settingsStore.logShowNull.collectAsStateWithLifecycle(initialValue = true)
+
+    val filteredLogs by remember {
+        derivedStateOf {
+            logs.filter { log ->
+                when (log.level) {
+                    LogLevel.INFO, LogLevel.WARN -> showInfo
+                    LogLevel.ERROR -> showError
+                    LogLevel.DEBUG -> showDebug
+                    LogLevel.UNKNOWN -> showNull
+                }
+            }
+        }
+    }
+
+    BackHandler { onBack() }
+
+    LaunchedEffect(filteredLogs.size) {
+        if (filteredLogs.isNotEmpty()) {
+            listState.animateScrollToItem(filteredLogs.size - 1)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            Column {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.title_system_logs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val text = filteredLogs.joinToString("\n") { if (it.count > 1) "${it.message} (x${it.count})" else it.message }
+                            cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
+                            Toast.makeText(context, context.getString(R.string.msg_logs_copied), Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White)
+                        }
+                        IconButton(onClick = { LogManager.clearLogs() }) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E1E1E))
+                )
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item { FilterChip(selected = showInfo, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } }, label = { Text("INFO") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) }
+                    item { FilterChip(selected = showError, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } }, label = { Text("ERROR") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.error, selectedLabelColor = MaterialTheme.colorScheme.onError)) }
+                    item { FilterChip(selected = showDebug, onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } }, label = { Text("DEBUG") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF455A64), selectedLabelColor = Color.White)) }
+                    item { FilterChip(selected = showNull, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } }, label = { Text("NULL") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF616161), selectedLabelColor = Color.White)) }
+                }
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(filteredLogs) { log ->
+                    val color = when (log.level) {
+                        LogLevel.ERROR -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+                    val textOutput = if (log.count > 1) "${log.message} (x${log.count})" else log.message
+                    Text(text = textOutput, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth())
+                }
+            }
         }
     }
 }

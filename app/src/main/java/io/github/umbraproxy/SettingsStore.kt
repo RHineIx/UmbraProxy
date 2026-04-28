@@ -20,7 +20,9 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_DIRECT_DC4_IP = "149.154.167.220"
         private const val LEGACY_DIRECT_DC_IP = "149.154.167.220"
         const val DEFAULT_LOG_SHOW_INFO = true
-        const val DEFAULT_LOG_SHOW_ERROR = false
+        const val DEFAULT_LOG_SHOW_ERROR = true
+        const val DEFAULT_LOG_SHOW_DEBUG = true
+        const val DEFAULT_LOG_SHOW_NULL = true
     }
 
     private object Keys {
@@ -37,6 +39,8 @@ class SettingsStore(private val context: Context) {
         val CFPROXY_ENABLED = booleanPreferencesKey("cfproxy_enabled")
         val CUSTOM_CF_DOMAIN_ENABLED = booleanPreferencesKey("custom_cf_domain_enabled")
         val CUSTOM_CF_DOMAIN = stringPreferencesKey("custom_cf_domain")
+        val FAKE_TLS_ENABLED = booleanPreferencesKey("fake_tls_enabled")
+        val FAKE_TLS_DOMAIN = stringPreferencesKey("fake_tls_domain")
         val AUTO_START_ON_BOOT = booleanPreferencesKey("auto_start_on_boot")
         val SECRET_KEY = stringPreferencesKey("secret_key")
         val LOG_SHOW_DEBUG = booleanPreferencesKey("log_show_debug")
@@ -46,11 +50,14 @@ class SettingsStore(private val context: Context) {
         val IS_EXPERIMENTAL_MODE = booleanPreferencesKey("is_experimental_mode")
         val DIRECT_DC_DEFAULTS_MIGRATED = booleanPreferencesKey("direct_dc_defaults_migrated")
         val DIRECT_DC_DEFAULTS_V2_MIGRATED = booleanPreferencesKey("direct_dc_defaults_v2_migrated")
+
+        val APP_LAUNCH_COUNT = intPreferencesKey("app_launch_count")
+        val QS_TILE_PROMPT_SHOWN = booleanPreferencesKey("qs_tile_prompt_shown")
     }
 
     val isReady: Flow<Boolean> = context.dataStore.data.map { true }
     val isExperimentalMode: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_EXPERIMENTAL_MODE] ?: false }
-    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "dark" }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "system" }
     val isDynamicColor: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_DYNAMIC_COLOR] ?: false }
     val themePalette: Flow<String> = context.dataStore.data.map { it[Keys.THEME_PALETTE] ?: "umbra" }
     val isDcAuto: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_DC_AUTO] ?: true }
@@ -71,8 +78,40 @@ class SettingsStore(private val context: Context) {
     val cfproxyEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.CFPROXY_ENABLED] ?: true }
     val customCfDomainEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.CUSTOM_CF_DOMAIN_ENABLED] ?: false }
     val customCfDomain: Flow<String> = context.dataStore.data.map { it[Keys.CUSTOM_CF_DOMAIN] ?: "" }
+    val fakeTlsEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.FAKE_TLS_ENABLED] ?: false }
+    val fakeTlsDomain: Flow<String> = context.dataStore.data.map { it[Keys.FAKE_TLS_DOMAIN] ?: "" }
     val autoStartOnBoot: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_START_ON_BOOT] ?: false }
     val secretKey: Flow<String> = context.dataStore.data.map { it[Keys.SECRET_KEY] ?: "" }
+
+    val logShowDebug: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_DEBUG] ?: DEFAULT_LOG_SHOW_DEBUG }
+    val logShowInfo: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_INFO] ?: DEFAULT_LOG_SHOW_INFO }
+    val logShowError: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_ERROR] ?: DEFAULT_LOG_SHOW_ERROR }
+    val logShowNull: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_NULL] ?: DEFAULT_LOG_SHOW_NULL }
+
+    val appLaunchCount: Flow<Int> = context.dataStore.data.map { it[Keys.APP_LAUNCH_COUNT] ?: 0 }
+    val qsTilePromptShown: Flow<Boolean> = context.dataStore.data.map { it[Keys.QS_TILE_PROMPT_SHOWN] ?: false }
+
+    suspend fun incrementLaunchCount() {
+        context.dataStore.edit {
+            val current = it[Keys.APP_LAUNCH_COUNT] ?: 0
+            it[Keys.APP_LAUNCH_COUNT] = current + 1
+        }
+    }
+
+    suspend fun markQsTilePromptShown() {
+        context.dataStore.edit {
+            it[Keys.QS_TILE_PROMPT_SHOWN] = true
+        }
+    }
+
+    // 🚀 Added missing functions for Theme Toolbar
+    suspend fun saveThemeMode(mode: String) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode }
+    }
+
+    suspend fun saveDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.IS_DYNAMIC_COLOR] = enabled }
+    }
 
     suspend fun saveSecretKey(key: String) {
         context.dataStore.edit { it[Keys.SECRET_KEY] = key }
@@ -113,7 +152,8 @@ class SettingsStore(private val context: Context) {
     suspend fun saveAll(isDcAuto: Boolean, dc1: String, dc2: String, dc3: String, dc4: String, dc5: String, dc203: String,
                         dc1m: String, dc2m: String, dc3m: String, dc4m: String, dc5m: String, dc203m: String,
                         isExperimental: Boolean, port: String, poolSize: Int,
-                        cfproxyEnabled: Boolean, customCfDomainEnabled: Boolean, customCfDomain: String, secretKey: String) {
+                        cfproxyEnabled: Boolean, customCfDomainEnabled: Boolean, customCfDomain: String,
+                        fakeTlsEnabled: Boolean, fakeTlsDomain: String, secretKey: String) {
         context.dataStore.edit {
             it[Keys.IS_DC_AUTO] = isDcAuto
             it[Keys.DC1] = dc1
@@ -134,6 +174,8 @@ class SettingsStore(private val context: Context) {
             it[Keys.CFPROXY_ENABLED] = cfproxyEnabled
             it[Keys.CUSTOM_CF_DOMAIN_ENABLED] = customCfDomainEnabled
             it[Keys.CUSTOM_CF_DOMAIN] = customCfDomain
+            it[Keys.FAKE_TLS_ENABLED] = fakeTlsEnabled
+            it[Keys.FAKE_TLS_DOMAIN] = fakeTlsDomain
             if(secretKey.isNotBlank()) {
                 it[Keys.SECRET_KEY] = secretKey
             }
