@@ -2,11 +2,14 @@ package io.github.umbraproxy
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.StatusBarManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon as AndroidIcon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -118,7 +121,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-    
+
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
@@ -142,16 +145,20 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val dc5m by settingsStore.dc5m.collectAsStateWithLifecycle(initialValue = "")
     val dc203m by settingsStore.dc203m.collectAsStateWithLifecycle(initialValue = "")
     val isExperimental by settingsStore.isExperimentalMode.collectAsStateWithLifecycle(initialValue = false)
-    
+
     val savedCfCustomEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
     val savedCfCustomDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
     val savedFakeTlsEnabled by settingsStore.fakeTlsEnabled.collectAsStateWithLifecycle(initialValue = false)
     val savedFakeTlsDomain by settingsStore.fakeTlsDomain.collectAsStateWithLifecycle(initialValue = "")
 
+    val appLaunchCount by settingsStore.appLaunchCount.collectAsStateWithLifecycle(initialValue = 0)
+    val qsPromptShown by settingsStore.qsTilePromptShown.collectAsStateWithLifecycle(initialValue = false)
+    var showQsDialog by rememberSaveable { mutableStateOf(false) }
+
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
     var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
     var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
-    
+
     var isDcAuto by rememberSaveable(savedIsDcAuto) { mutableStateOf(savedIsDcAuto) }
     var dc2Text by rememberSaveable(savedDc2) { mutableStateOf(savedDc2) }
     var dc4Text by rememberSaveable(savedDc4) { mutableStateOf(savedDc4) }
@@ -160,6 +167,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
+
+    // Increment launch count safely
+    LaunchedEffect(Unit) {
+        settingsStore.incrementLaunchCount()
+    }
 
     LaunchedEffect(isReady) {
         if (isReady) {
@@ -175,7 +187,16 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
-                context.startActivity(intent)
+                try { context.startActivity(intent) } catch (e: Exception) {}
+            }
+        }
+    }
+
+    // Trigger Quick Settings Tile Prompt Logic (API 33+)
+    LaunchedEffect(appLaunchCount, qsPromptShown) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (appLaunchCount >= 3 && !qsPromptShown) {
+                showQsDialog = true
             }
         }
     }
@@ -214,8 +235,8 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             settingsStore.saveAll(
                 newDcAuto, dc1, newDc2, dc3, newDc4, dc5, dc203,
                 dc1m, dc2m, dc3m, dc4m, dc5m, dc203m,
-                isExperimental, newPort, newPool, 
-                newCf, newCfCustom, newCfDomain, 
+                isExperimental, newPort, newPool,
+                newCf, newCfCustom, newCfDomain,
                 newFakeTls, newFakeTlsDomain, newSecret
             )
         }
@@ -223,6 +244,46 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
     var isStarting by remember { mutableStateOf(false) }
     LaunchedEffect(isRunning) { if (isRunning || !isRunning) { delay(600); isStarting = false } }
+
+    if (showQsDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showQsDialog = false
+                scope.launch { settingsStore.markQsTilePromptShown() }
+            },
+            containerColor = Color(0xFF1E1E1E),
+            titleContentColor = Color.White,
+            textContentColor = Color.LightGray,
+            title = { Text("Quick Access Shortcut", fontWeight = FontWeight.Bold) },
+            text = { Text("Would you like to add a quick toggle to your notification panel for easier access to the proxy?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showQsDialog = false
+                    scope.launch { settingsStore.markQsTilePromptShown() }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val statusBarManager = context.getSystemService(StatusBarManager::class.java)
+                        val componentName = ComponentName(context, ProxyTileService::class.java)
+                        statusBarManager.requestAddTileService(
+                            componentName,
+                            "UmbraProxy",
+                            AndroidIcon.createWithResource(context, R.drawable.tile),
+                            context.mainExecutor
+                        ) {}
+                    }
+                }) {
+                    Text("Add", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showQsDialog = false
+                    scope.launch { settingsStore.markQsTilePromptShown() }
+                }) {
+                    Text("Later", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
@@ -241,7 +302,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             MainConnectionToggle(isRunning = isRunning, isStarting = isStarting, onClick = {
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
@@ -250,11 +311,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     scope.launch { ProxyController.startFromSavedSettings(context, true) }
                 }
             })
-            
+
             Spacer(modifier = Modifier.height(24.dp))
             Text(text = when { isStarting -> "Connecting..."; isRunning -> "Connected & Secured"; else -> "System Standby" },
                 style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            
+
             AnimatedVisibility(
                 visible = isRunning,
                 enter = fadeIn() + expandVertically(),
@@ -289,14 +350,14 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant))
                     }
-                    
+
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
-                    
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Cloudflare Routing", style = MaterialTheme.typography.bodyLarge)
                         Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                     }
-                    
+
                     AnimatedVisibility(visible = savedCfEnabled) {
                         Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -342,8 +403,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
-                    
-                    // 🚀 Advanced: Direct DC IPs Setup (Now with Auto DC Switch)
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().clickable(enabled = !isRunning) { isAdvancedExpanded = !isAdvancedExpanded }.padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Advanced: Direct DC IPs", style = MaterialTheme.typography.bodyLarge)
@@ -359,7 +419,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                                     Text("Auto Routing (Skip Hardcoded IPs)", style = MaterialTheme.typography.bodyMedium)
                                     Switch(checked = isDcAuto, onCheckedChange = { isDcAuto = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, it, dc2Text, dc4Text) }, enabled = !isRunning, modifier = Modifier.scale(0.85f))
                                 }
-                                
+
                                 AnimatedVisibility(visible = !isDcAuto) {
                                     Column {
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -399,7 +459,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
-                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
+                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
@@ -407,9 +467,9 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                             }
                         }
                     }
-                    
+
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp))
-                    
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Proxy Secret", style = MaterialTheme.typography.bodyLarge)
@@ -461,7 +521,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
@@ -476,7 +536,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
             logs.filter { log ->
                 when (log.level) {
                     LogLevel.INFO -> showInfo
-                    LogLevel.WARN -> showInfo 
+                    LogLevel.WARN -> showInfo
                     LogLevel.ERROR -> showError
                     LogLevel.DEBUG -> showDebug
                     LogLevel.UNKNOWN -> showNull

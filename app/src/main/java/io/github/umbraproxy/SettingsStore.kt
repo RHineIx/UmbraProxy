@@ -50,6 +50,9 @@ class SettingsStore(private val context: Context) {
         val IS_EXPERIMENTAL_MODE = booleanPreferencesKey("is_experimental_mode")
         val DIRECT_DC_DEFAULTS_MIGRATED = booleanPreferencesKey("direct_dc_defaults_migrated")
         val DIRECT_DC_DEFAULTS_V2_MIGRATED = booleanPreferencesKey("direct_dc_defaults_v2_migrated")
+
+        val APP_LAUNCH_COUNT = intPreferencesKey("app_launch_count")
+        val QS_TILE_PROMPT_SHOWN = booleanPreferencesKey("qs_tile_prompt_shown")
     }
 
     val isReady: Flow<Boolean> = context.dataStore.data.map { true }
@@ -80,11 +83,26 @@ class SettingsStore(private val context: Context) {
     val autoStartOnBoot: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_START_ON_BOOT] ?: false }
     val secretKey: Flow<String> = context.dataStore.data.map { it[Keys.SECRET_KEY] ?: "" }
 
-    // Log Filtering Flows
     val logShowDebug: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_DEBUG] ?: DEFAULT_LOG_SHOW_DEBUG }
     val logShowInfo: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_INFO] ?: DEFAULT_LOG_SHOW_INFO }
     val logShowError: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_ERROR] ?: DEFAULT_LOG_SHOW_ERROR }
     val logShowNull: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_NULL] ?: DEFAULT_LOG_SHOW_NULL }
+
+    val appLaunchCount: Flow<Int> = context.dataStore.data.map { it[Keys.APP_LAUNCH_COUNT] ?: 0 }
+    val qsTilePromptShown: Flow<Boolean> = context.dataStore.data.map { it[Keys.QS_TILE_PROMPT_SHOWN] ?: false }
+
+    suspend fun incrementLaunchCount() {
+        context.dataStore.edit {
+            val current = it[Keys.APP_LAUNCH_COUNT] ?: 0
+            it[Keys.APP_LAUNCH_COUNT] = current + 1
+        }
+    }
+
+    suspend fun markQsTilePromptShown() {
+        context.dataStore.edit {
+            it[Keys.QS_TILE_PROMPT_SHOWN] = true
+        }
+    }
 
     suspend fun saveSecretKey(key: String) {
         context.dataStore.edit { it[Keys.SECRET_KEY] = key }
