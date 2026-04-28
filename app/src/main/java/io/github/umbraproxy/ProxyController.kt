@@ -23,7 +23,8 @@ object ProxyController {
 
         val dc2 = settingsStore.dc2.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC2_IP
         val dc4 = settingsStore.dc4.first().takeIf { it.isNotBlank() } ?: SettingsStore.DEFAULT_DIRECT_DC4_IP
-        val dcIps = "2:$dc2,4:$dc4"
+        
+        val dcIps = "2:$dc2,-2:$dc2,4:$dc4,-4:$dc4"
 
         var secretKey = settingsStore.secretKey.first()
 
