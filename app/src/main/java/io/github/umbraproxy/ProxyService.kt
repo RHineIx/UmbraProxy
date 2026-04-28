@@ -67,11 +67,12 @@ class ProxyService : Service() {
         val fakeTlsEnabled = intent?.getBooleanExtra("FAKE_TLS_ENABLED", false) ?: false
         val fakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
         val secret = intent?.getStringExtra("SECRET") ?: ""
+        val dcIps = intent?.getStringExtra("DC_IPS") ?: ""
 
         startForeground(NOTIFICATION_ID, createNotification("Starting UmbraProxy..."))
 
         CoroutineScope(Dispatchers.IO).launch {
-            val success = NativeProxy.startProxy(port, cfEnabled, cfDomain, fakeTlsEnabled, fakeTlsDomain, secret)
+            val success = NativeProxy.startProxy(port, cfEnabled, cfDomain, fakeTlsEnabled, fakeTlsDomain, secret, dcIps)
             withContext(Dispatchers.Main) {
                 if (success) {
                     updateState(true)
@@ -126,7 +127,7 @@ class ProxyService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("UmbraProxy")
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.ic_secure) // Reverted to default secure icon
+            .setSmallIcon(android.R.drawable.ic_secure)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)

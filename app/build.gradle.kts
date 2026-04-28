@@ -11,11 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "io.github.umbraproxy"
-        // 🚀 Bumping minSdk to 26 to fix adaptive-icon AAPT error and modernize the app
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -23,11 +22,9 @@ android {
         }
 
         ndk {
-            // 🚀 Explicitly limit to targeted ABIs to save build time and final APK size
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
         }
 
-        // 🚀 Strip all unused languages from libraries to heavily reduce APK size
         resourceConfigurations.addAll(listOf("en", "ar"))
     }
 
@@ -35,7 +32,6 @@ android {
         abi {
             isEnable = true
             reset()
-            // 🚀 Limit split generation
             include("arm64-v8a", "armeabi-v7a")
             isUniversalApk = true
         }
@@ -72,7 +68,6 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
-            // 🚀 Strip unused XMLs and drawables from the final APK
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -104,7 +99,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // Exclude unnecessary kotlin meta files from production
             excludes += "/**/*.kotlin_module"
         }
     }
@@ -134,7 +128,6 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     
-    // LeakCanary is restricted to debug builds only, preventing massive memory overhead in production
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     implementation("androidx.compose.material:material-icons-extended")
 }

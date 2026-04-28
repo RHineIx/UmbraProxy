@@ -34,11 +34,11 @@ object NativeProxy {
         }
     }
 
-    fun startProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String): Boolean {
+    fun startProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String, dcIps: String): Boolean {
         return try {
             ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, cfDomain)
             ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
-            val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, "", secret, 0)
+            val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, dcIps, secret, 0)
             result == 0
         } catch (e: Throwable) {
             false
