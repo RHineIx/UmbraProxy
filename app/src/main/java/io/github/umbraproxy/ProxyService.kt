@@ -126,7 +126,7 @@ class ProxyService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("UmbraProxy")
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_notification) // Utilizing the newly generated pure-white vector
+            .setSmallIcon(android.R.drawable.ic_secure) // Reverted to default secure icon
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)

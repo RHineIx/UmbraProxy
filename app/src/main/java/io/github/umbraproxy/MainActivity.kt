@@ -34,6 +34,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -97,7 +99,10 @@ class MainActivity : ComponentActivity() {
                         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
                     ) {
-                        LogsScreen(onBack = { showLogsScreen = false })
+                        LogsScreen(
+                            settingsStore = settingsStore,
+                            onBack = { showLogsScreen = false }
+                        )
                     }
                 }
             }
@@ -401,76 +406,131 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogsScreen(onBack: () -> Unit) {
+fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
-    // Handle physical back button
-    BackHandler {
-        onBack()
+    // Filter states backed by DataStore
+    val showInfo by settingsStore.logShowInfo.collectAsStateWithLifecycle(initialValue = true)
+    val showError by settingsStore.logShowError.collectAsStateWithLifecycle(initialValue = true)
+    val showDebug by settingsStore.logShowDebug.collectAsStateWithLifecycle(initialValue = true)
+    val showNull by settingsStore.logShowNull.collectAsStateWithLifecycle(initialValue = true)
+
+    // Derived state for fast and smooth filtering
+    val filteredLogs by remember {
+        derivedStateOf {
+            logs.filter { log ->
+                when (log.level) {
+                    LogLevel.INFO -> showInfo
+                    LogLevel.WARN -> showInfo // Group WARN with INFO for simplicity
+                    LogLevel.ERROR -> showError
+                    LogLevel.DEBUG -> showDebug
+                    LogLevel.UNKNOWN -> showNull
+                }
+            }
+        }
     }
 
+    BackHandler { onBack() }
+
     // Auto-scroll to the bottom when new logs arrive
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) {
-            listState.animateScrollToItem(logs.size - 1)
+    LaunchedEffect(filteredLogs.size) {
+        if (filteredLogs.isNotEmpty()) {
+            listState.animateScrollToItem(filteredLogs.size - 1)
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("System Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val text = logs.joinToString("\n") { it.message }
-                        cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
-                        Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs")
-                    }
-                    IconButton(onClick = { LogManager.clearLogs() }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear Logs", tint = MaterialTheme.colorScheme.error)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0F0F0F),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White
+            Column {
+                TopAppBar(
+                    title = { Text("System Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val text = filteredLogs.joinToString("\n") { it.message }
+                            cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
+                            Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Color.White)
+                        }
+                        IconButton(onClick = { LogManager.clearLogs() }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Clear Logs", tint = Color.White)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF121212))
                 )
-            )
+                // Filter Chips Row
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF121212))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = showInfo,
+                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } },
+                            label = { Text("INFO") },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF2E7D32), selectedLabelColor = Color.White)
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = showError,
+                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } },
+                            label = { Text("ERROR") },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFFB71C1C), selectedLabelColor = Color.White)
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = showDebug,
+                            onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } },
+                            label = { Text("DEBUG") },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF37474F), selectedLabelColor = Color.White)
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = showNull,
+                            onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } },
+                            label = { Text("NULL") },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF424242), selectedLabelColor = Color.White)
+                        )
+                    }
+                }
+            }
         },
-        containerColor = Color(0xFF0A0A0A) // Deep terminal black
+        containerColor = Color.Black // Solid black background for optimal readability
     ) { innerPadding ->
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(logs) { log ->
-                val color = when (log.level) {
-                    LogLevel.INFO -> Color(0xFF4CAF50) // Green
-                    LogLevel.WARN -> Color(0xFFFFC107) // Amber
-                    LogLevel.ERROR -> Color(0xFFF44336) // Red
-                    LogLevel.DEBUG -> Color(0xFF9E9E9E) // Grey
-                    LogLevel.UNKNOWN -> Color.White
-                }
+            items(filteredLogs) { log ->
+                // Apply Green text generally, but Red for explicit Errors to keep them noticeable
+                val textColor = if (log.level == LogLevel.ERROR) Color(0xFFFF5252) else Color(0xFF4CAF50)
+                
                 Text(
                     text = log.message,
-                    color = color,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = FontFamily.Monospace
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }

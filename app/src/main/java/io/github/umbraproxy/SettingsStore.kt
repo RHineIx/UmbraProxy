@@ -20,7 +20,9 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_DIRECT_DC4_IP = "149.154.167.220"
         private const val LEGACY_DIRECT_DC_IP = "149.154.167.220"
         const val DEFAULT_LOG_SHOW_INFO = true
-        const val DEFAULT_LOG_SHOW_ERROR = false
+        const val DEFAULT_LOG_SHOW_ERROR = true
+        const val DEFAULT_LOG_SHOW_DEBUG = true
+        const val DEFAULT_LOG_SHOW_NULL = true
     }
 
     private object Keys {
@@ -77,6 +79,12 @@ class SettingsStore(private val context: Context) {
     val fakeTlsDomain: Flow<String> = context.dataStore.data.map { it[Keys.FAKE_TLS_DOMAIN] ?: "" }
     val autoStartOnBoot: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_START_ON_BOOT] ?: false }
     val secretKey: Flow<String> = context.dataStore.data.map { it[Keys.SECRET_KEY] ?: "" }
+
+    // Log Filtering Flows
+    val logShowDebug: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_DEBUG] ?: DEFAULT_LOG_SHOW_DEBUG }
+    val logShowInfo: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_INFO] ?: DEFAULT_LOG_SHOW_INFO }
+    val logShowError: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_ERROR] ?: DEFAULT_LOG_SHOW_ERROR }
+    val logShowNull: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_NULL] ?: DEFAULT_LOG_SHOW_NULL }
 
     suspend fun saveSecretKey(key: String) {
         context.dataStore.edit { it[Keys.SECRET_KEY] = key }
