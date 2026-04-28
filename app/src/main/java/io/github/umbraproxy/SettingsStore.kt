@@ -57,7 +57,7 @@ class SettingsStore(private val context: Context) {
 
     val isReady: Flow<Boolean> = context.dataStore.data.map { true }
     val isExperimentalMode: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_EXPERIMENTAL_MODE] ?: false }
-    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "dark" }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "system" }
     val isDynamicColor: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_DYNAMIC_COLOR] ?: false }
     val themePalette: Flow<String> = context.dataStore.data.map { it[Keys.THEME_PALETTE] ?: "umbra" }
     val isDcAuto: Flow<Boolean> = context.dataStore.data.map { it[Keys.IS_DC_AUTO] ?: true }
@@ -102,6 +102,15 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit {
             it[Keys.QS_TILE_PROMPT_SHOWN] = true
         }
+    }
+
+    // 🚀 Added missing functions for Theme Toolbar
+    suspend fun saveThemeMode(mode: String) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode }
+    }
+
+    suspend fun saveDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.IS_DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun saveSecretKey(key: String) {

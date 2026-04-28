@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.umbraproxy.ui.FloatingToolbar
 import io.github.umbraproxy.ui.UmbraProxyTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -90,13 +91,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val settingsStore = remember { SettingsStore(context) }
+            val scope = rememberCoroutineScope()
+
+            val themeMode by settingsStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
+            val isDynamicColor by settingsStore.isDynamicColor.collectAsStateWithLifecycle(initialValue = false)
+
             var showLogsScreen by rememberSaveable { mutableStateOf(false) }
 
-            UmbraProxyTheme {
+            UmbraProxyTheme(themeMode = themeMode, dynamicColor = isDynamicColor) {
                 Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     UmbraMainScreen(
                         settingsStore = settingsStore,
                         onOpenLogs = { showLogsScreen = true }
+                    )
+
+                    FloatingToolbar(
+                        currentTheme = themeMode,
+                        onThemeChange = { mode -> scope.launch { settingsStore.saveThemeMode(mode) } },
+                        isDynamicColor = isDynamicColor,
+                        onDynamicColorChange = { dc -> scope.launch { settingsStore.saveDynamicColor(dc) } }
                     )
 
                     AnimatedVisibility(
@@ -121,7 +134,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-    
+
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
@@ -136,7 +149,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val savedDc2 by settingsStore.dc2.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC2_IP)
     val savedDc4 by settingsStore.dc4.collectAsStateWithLifecycle(initialValue = SettingsStore.DEFAULT_DIRECT_DC4_IP)
     val isExperimental by settingsStore.isExperimentalMode.collectAsStateWithLifecycle(initialValue = false)
-    
+
     val savedCfCustomEnabled by settingsStore.customCfDomainEnabled.collectAsStateWithLifecycle(initialValue = false)
     val savedCfCustomDomain by settingsStore.customCfDomain.collectAsStateWithLifecycle(initialValue = "")
     val savedFakeTlsEnabled by settingsStore.fakeTlsEnabled.collectAsStateWithLifecycle(initialValue = false)
@@ -149,7 +162,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     var portText by rememberSaveable(savedPort) { mutableStateOf(savedPort) }
     var cfDomainText by rememberSaveable(savedCfCustomDomain) { mutableStateOf(savedCfCustomDomain) }
     var fakeTlsDomainText by rememberSaveable(savedFakeTlsDomain) { mutableStateOf(savedFakeTlsDomain) }
-    
+
     var isDcAuto by rememberSaveable(savedIsDcAuto) { mutableStateOf(savedIsDcAuto) }
     var dc2Text by rememberSaveable(savedDc2) { mutableStateOf(savedDc2) }
     var dc4Text by rememberSaveable(savedDc4) { mutableStateOf(savedDc4) }
@@ -224,8 +237,8 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             settingsStore.saveAll(
                 newDcAuto, dc1, newDc2, "", newDc4, "", "",
                 "", "", "", "", "", "",
-                isExperimental, newPort, newPool, 
-                newCf, newCfCustom, newCfDomain, 
+                isExperimental, newPort, newPool,
+                newCf, newCfCustom, newCfDomain,
                 newFakeTls, newFakeTlsDomain, newSecret
             )
         }
@@ -236,7 +249,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
 
     if (showQsDialog) {
         AlertDialog(
-            onDismissRequest = { 
+            onDismissRequest = {
                 showQsDialog = false
                 scope.launch { settingsStore.markQsTilePromptShown() }
             },
@@ -251,7 +264,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         val componentName = ComponentName(context, ProxyTileService::class.java)
                         statusBarManager.requestAddTileService(
                             componentName,
-                            stringResource(R.string.app_name),
+                            context.getString(R.string.app_name), // 🚀 FIXED: Extracted safely using context
                             AndroidIcon.createWithResource(context, R.drawable.tile),
                             context.mainExecutor
                         ) {}
@@ -272,6 +285,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
     ) { innerPadding ->
         Column(
@@ -288,7 +302,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             MainConnectionToggle(isRunning = isRunning, isStarting = isStarting, onClick = {
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
@@ -297,11 +311,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     scope.launch { ProxyController.startFromSavedSettings(context, true) }
                 }
             })
-            
+
             Spacer(modifier = Modifier.height(24.dp))
             Text(text = when { isStarting -> stringResource(R.string.status_connecting); isRunning -> stringResource(R.string.status_connected); else -> stringResource(R.string.status_standby) },
                 style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            
+
             AnimatedVisibility(
                 visible = isRunning,
                 enter = fadeIn() + expandVertically(),
@@ -335,14 +349,14 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), modifier = Modifier.width(100.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center), singleLine = true, shape = RoundedCornerShape(12.dp))
                     }
-                    
+
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.label_cf_routing), style = MaterialTheme.typography.bodyLarge)
                         Switch(checked = savedCfEnabled, onCheckedChange = { saveSettings(portText, it, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, isDcAuto, dc2Text, dc4Text) }, enabled = !isRunning)
                     }
-                    
+
                     AnimatedVisibility(visible = savedCfEnabled) {
                         Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -388,7 +402,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().clickable(enabled = !isRunning) { isAdvancedExpanded = !isAdvancedExpanded }.padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.label_advanced_dc), style = MaterialTheme.typography.bodyLarge)
@@ -400,7 +414,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                                     Text(stringResource(R.string.label_auto_routing), style = MaterialTheme.typography.bodyMedium)
                                     Switch(checked = isDcAuto, onCheckedChange = { isDcAuto = it; saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, savedPoolSize, savedSecretKey, it, dc2Text, dc4Text) }, enabled = !isRunning, modifier = Modifier.scale(0.85f))
                                 }
-                                
+
                                 AnimatedVisibility(visible = !isDcAuto) {
                                     Column {
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -425,7 +439,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(2, 4, 6).forEach { size ->
                                 val isSelected = savedPoolSize == size
-                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) { 
+                                Surface(modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = !isRunning) {
                                     focusManager.clearFocus(); saveSettings(portText, savedCfEnabled, savedCfCustomEnabled, cfDomainText, savedFakeTlsEnabled, fakeTlsDomainText, size, savedSecretKey, isDcAuto, dc2Text, dc4Text) },
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
                                     Box(contentAlignment = Alignment.Center) { Text(text = "$size", color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) }
@@ -433,9 +447,9 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                             }
                         }
                     }
-                    
+
                     HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.label_proxy_secret), style = MaterialTheme.typography.bodyLarge)
@@ -520,10 +534,10 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text(stringResource(R.string.title_system_logs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.title_system_logs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = null)
+                            Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.White)
                         }
                     },
                     actions = {
@@ -533,24 +547,26 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                             cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
                             Toast.makeText(context, context.getString(R.string.msg_logs_copied), Toast.LENGTH_SHORT).show()
                         }) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null)
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White)
                         }
                         IconButton(onClick = { LogManager.clearLogs() }) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                         }
-                    }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E1E1E))
                 )
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    item { FilterChip(selected = showInfo, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } }, label = { Text("INFO") }) }
-                    item { FilterChip(selected = showError, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } }, label = { Text("ERROR") }) }
-                    item { FilterChip(selected = showDebug, onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } }, label = { Text("DEBUG") }) }
-                    item { FilterChip(selected = showNull, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } }, label = { Text("NULL") }) }
+                    item { FilterChip(selected = showInfo, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } }, label = { Text("INFO") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) }
+                    item { FilterChip(selected = showError, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } }, label = { Text("ERROR") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.error, selectedLabelColor = MaterialTheme.colorScheme.onError)) }
+                    item { FilterChip(selected = showDebug, onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } }, label = { Text("DEBUG") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF455A64), selectedLabelColor = Color.White)) }
+                    item { FilterChip(selected = showNull, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } }, label = { Text("NULL") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF616161), selectedLabelColor = Color.White)) }
                 }
             }
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
             LazyColumn(
@@ -561,7 +577,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                 items(filteredLogs) { log ->
                     val color = when (log.level) {
                         LogLevel.ERROR -> MaterialTheme.colorScheme.error
-                        else -> if (isSystemInDarkTheme()) Color(0xFF4CAF50) else Color(0xFF1B5E20)
+                        else -> MaterialTheme.colorScheme.primary
                     }
                     val textOutput = if (log.count > 1) "${log.message} (x${log.count})" else log.message
                     Text(text = textOutput, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth())

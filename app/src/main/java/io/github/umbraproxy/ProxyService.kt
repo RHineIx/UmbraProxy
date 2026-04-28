@@ -92,7 +92,7 @@ class ProxyService : Service() {
     private fun startWatchdogAndStats(port: Int) {
         watchdogJob?.cancel()
         statsUpdateJob?.cancel()
-        
+
         watchdogJob = serviceScope.launch {
             delay(3000)
             if (_isRunning.value) {
@@ -128,7 +128,7 @@ class ProxyService : Service() {
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
                     updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
                 }
-                delay(2000) 
+                delay(2000)
             }
         }
     }
@@ -167,7 +167,7 @@ class ProxyService : Service() {
     private fun stopProxyInternal() {
         statsUpdateJob?.cancel()
         watchdogJob?.cancel()
-        
+
         serviceScope.launch {
             updateNotification(getString(R.string.service_stopping))
             withContext(Dispatchers.IO) {

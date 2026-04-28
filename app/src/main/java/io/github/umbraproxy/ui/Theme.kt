@@ -16,42 +16,50 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+// 🌙 Dark Palette (Telegram Dark Blue Identity)
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF4CAF50), // Terminal Green
+    primary = Color(0xFF33A8E6), // Telegram-like bright blue for dark mode
     onPrimary = Color(0xFF000000),
-    primaryContainer = Color(0xFF1B5E20),
-    onPrimaryContainer = Color(0xFFA5D6A7),
-    background = Color(0xFF0D0D0D), // Deep Black
+    primaryContainer = Color(0xFF004A77),
+    onPrimaryContainer = Color(0xFFD1EEFC),
+    background = Color(0xFF0F0F0F),
     onBackground = Color(0xFFE0E0E0),
     surface = Color(0xFF1A1A1A),
     onSurface = Color(0xFFE0E0E0),
     surfaceVariant = Color(0xFF2C2C2C),
     onSurfaceVariant = Color(0xFFA0A0A0),
-    outline = Color(0xFF4CAF50),
+    outline = Color(0xFF33A8E6),
     error = Color(0xFFFF5252)
 )
 
+// ☀️ Light Palette (Telegram Classic Blue Identity)
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF2E7D32), // Darker Green for visibility
+    primary = Color(0xFF0088CC), // Classic Telegram Blue
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFC8E6C9),
-    onPrimaryContainer = Color(0xFF1B5E20),
-    background = Color(0xFFF8F9FA), // Off-white
+    primaryContainer = Color(0xFFD1EEFC),
+    onPrimaryContainer = Color(0xFF003355),
+    background = Color(0xFFF0F2F5),
     onBackground = Color(0xFF121212),
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF121212),
     surfaceVariant = Color(0xFFE0E0E0),
     onSurfaceVariant = Color(0xFF424242),
-    outline = Color(0xFF2E7D32),
+    outline = Color(0xFF0088CC),
     error = Color(0xFFD32F2F)
 )
 
 @Composable
 fun UmbraProxyTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: String = "system",
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
@@ -65,14 +73,14 @@ fun UmbraProxyTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            
+
             // Make Status Bar & Navigation Bar transparent
             window.statusBarColor = Color.Transparent.toArgb()
             window.navigationBarColor = Color.Transparent.toArgb()
-            
+
             // Allow drawing under system bars
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            
+
             // Adjust icon colors (dark icons for light theme, light icons for dark theme)
             val insetsController = WindowCompat.getInsetsController(window, view)
             insetsController.isAppearanceLightStatusBars = !darkTheme
