@@ -41,11 +41,15 @@ class ProxyService : Service() {
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning
 
+        private val _isStarting = MutableStateFlow(false)
+        val isStarting: StateFlow<Boolean> = _isStarting
+
         private val _liveStats = MutableStateFlow(ProxyStats())
         val liveStats: StateFlow<ProxyStats> = _liveStats
 
         fun updateState(running: Boolean) {
             _isRunning.value = running
+            _isStarting.value = false // Ensure starting state is cleared
             if (!running) {
                 _liveStats.value = ProxyStats()
             }
@@ -63,6 +67,11 @@ class ProxyService : Service() {
             return START_NOT_STICKY
         }
 
+        if (_isRunning.value || _isStarting.value) {
+            Log.i("UmbraProxy", "Service already running or starting, ignoring duplicate intent.")
+            return START_STICKY
+        }
+
         val port = intent?.getIntExtra("PORT", 1443) ?: 1443
         val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
         val cfDomain = intent?.getStringExtra("CF_DOMAIN") ?: ""
@@ -70,6 +79,8 @@ class ProxyService : Service() {
         val fakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
         val secret = intent?.getStringExtra("SECRET") ?: ""
         val dcIps = intent?.getStringExtra("DC_IPS") ?: ""
+
+        _isStarting.value = true
 
         startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting)))
         acquireWakeLock()
@@ -81,6 +92,7 @@ class ProxyService : Service() {
                     updateState(true)
                     startWatchdogAndStats(port)
                 } else {
+                    _isStarting.value = false
                     stopSelf()
                 }
             }

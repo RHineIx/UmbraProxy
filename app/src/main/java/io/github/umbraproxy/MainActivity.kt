@@ -75,11 +75,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.umbraproxy.ui.FloatingToolbar
 import io.github.umbraproxy.ui.UmbraProxyTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -134,8 +136,10 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
+    val isStarting by ProxyService.isStarting.collectAsStateWithLifecycle() // 🚀 FIXED: True sync from service
     val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
 
@@ -176,10 +180,26 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
         settingsStore.incrementLaunchCount()
     }
 
+    // 🚀 FIXED: LogManager is now strictly tied to UI foreground visibility to save battery.
+    DisposableEffect(lifecycleOwner, isReady) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (isReady) {
+                when (event) {
+                    Lifecycle.Event.ON_START -> LogManager.startLogging()
+                    Lifecycle.Event.ON_STOP -> LogManager.stopLogging()
+                    else -> {}
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            LogManager.stopLogging() // Safely clean up on destruction
+        }
+    }
+
     LaunchedEffect(isReady) {
         if (isReady) {
-            LogManager.startLogging()
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -244,9 +264,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
         }
     }
 
-    var isStarting by remember { mutableStateOf(false) }
-    LaunchedEffect(isRunning) { if (isRunning || !isRunning) { delay(600); isStarting = false } }
-
     if (showQsDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -264,7 +281,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         val componentName = ComponentName(context, ProxyTileService::class.java)
                         statusBarManager.requestAddTileService(
                             componentName,
-                            context.getString(R.string.app_name), // 🚀 FIXED: Extracted safely using context
+                            context.getString(R.string.app_name),
                             AndroidIcon.createWithResource(context, R.drawable.tile),
                             context.mainExecutor
                         ) {}
@@ -307,7 +324,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
                 else if (!isStarting) {
-                    isStarting = true
                     scope.launch { ProxyController.startFromSavedSettings(context, true) }
                 }
             })

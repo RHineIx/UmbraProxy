@@ -28,7 +28,6 @@ object NativeProxy {
 
     fun updateConfigForSecret(secret: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String) {
         runCatching {
-            // Update the core state so GetSecretWithPrefix() returns the correct URL payload
             ProxyLibrary.INSTANCE.SetSecret(secret)
             ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
         }
@@ -50,24 +49,24 @@ object NativeProxy {
     }
 
     fun getStats(): String? {
+        val ptr = ProxyLibrary.INSTANCE.GetStats() ?: return null
         return try {
-            val ptr = ProxyLibrary.INSTANCE.GetStats() ?: return null
-            val stats = ptr.getString(0)
-            ProxyLibrary.INSTANCE.FreeString(ptr)
-            stats
+            ptr.getString(0)
         } catch (e: Throwable) {
             null
+        } finally {
+            ProxyLibrary.INSTANCE.FreeString(ptr)
         }
     }
 
     fun getSecretWithPrefix(): String? {
+        val ptr = ProxyLibrary.INSTANCE.GetSecretWithPrefix() ?: return null
         return try {
-            val ptr = ProxyLibrary.INSTANCE.GetSecretWithPrefix() ?: return null
-            val res = ptr.getString(0)
-            ProxyLibrary.INSTANCE.FreeString(ptr)
-            res
+            ptr.getString(0)
         } catch (e: Throwable) {
             null
+        } finally {
+            ProxyLibrary.INSTANCE.FreeString(ptr)
         }
     }
 }
