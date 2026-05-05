@@ -7,15 +7,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +39,7 @@ class ProxyService : Service() {
     private var statsUpdateJob: Job? = null
     private var watchdogJob: Job? = null
 
+    // Network Resiliency State: Cache configuration for soft restarts
     private var lastPort: Int = 1443
     private var lastCfEnabled: Boolean = true
     private var lastCfDomain: String = ""
@@ -97,25 +99,24 @@ class ProxyService : Service() {
                 }
             }
             connectivityManager?.registerNetworkCallback(request, networkCallback!!)
-            Log.i("UmbraProxy", "Network monitor registered successfully")
         } catch (e: Exception) {
             Log.e("UmbraProxy", "Failed to setup network monitor", e)
         }
     }
 
     private fun scheduleSoftRestart(reason: String) {
-        if (!_isRunning.value) return
+        if (!_isRunning.value) return 
 
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
-            delay(1500)
+            delay(1500) // Debounce
 
             reconnectMutex.withLock {
                 if (!_isRunning.value) return@withLock
 
                 Log.i("UmbraProxy", "Triggering soft restart due to: $reason")
                 _isStarting.value = true
-                updateNotification(getString(R.string.status_connecting))
+                updateNotification(getString(R.string.status_connecting), "Connecting...")
 
                 withContext(Dispatchers.IO) {
                     NativeProxy.stopProxy()
@@ -128,10 +129,8 @@ class ProxyService : Service() {
                     withContext(Dispatchers.Main) {
                         if (success) {
                             _isStarting.value = false
-                            Log.i("UmbraProxy", "Soft restart completed successfully")
                             startWatchdogAndStats(lastPort)
                         } else {
-                            Log.e("UmbraProxy", "Soft restart failed, initiating full shutdown")
                             stopProxyInternal()
                         }
                     }
@@ -147,7 +146,6 @@ class ProxyService : Service() {
         }
 
         if (_isRunning.value || _isStarting.value) {
-            Log.i("UmbraProxy", "Service already running or starting, ignoring duplicate intent.")
             return START_STICKY
         }
 
@@ -161,7 +159,7 @@ class ProxyService : Service() {
 
         _isStarting.value = true
 
-        startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting)))
+        startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting), "Starting..."))
         acquireWakeLock()
 
         serviceScope.launch {
@@ -198,7 +196,7 @@ class ProxyService : Service() {
                     } catch (e: Exception) { false }
                 }
                 if (!isListening) {
-                    updateNotification(getString(R.string.core_unresponsive))
+                    updateNotification(getString(R.string.core_unresponsive), "Unresponsive")
                 }
             }
         }
@@ -219,7 +217,10 @@ class ProxyService : Service() {
                     val down = extractValue(rawStats, "down=")
 
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
-                    updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
+                    
+                    val content = "${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up"
+                    val chipText = "↑ $up  ↓ $down"
+                    updateNotification(content, chipText)
                 }
                 delay(2000)
             }
@@ -230,31 +231,57 @@ class ProxyService : Service() {
         return stats.substringAfter(key, "").substringBefore(" ", "0")
     }
 
-    private fun updateNotification(content: String) {
+    private fun updateNotification(content: String, chipText: String? = null) {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, createNotification(content))
+            manager.notify(NOTIFICATION_ID, createNotification(content, chipText))
         } catch (e: Exception) { Log.w("UmbraProxy", "Failed to notify", e) }
     }
 
-    private fun createNotification(content: String): Notification {
+    private fun createNotification(content: String, chipText: String? = null): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val stopIntent = Intent(this, ProxyService::class.java).apply { action = "STOP_SERVICE" }
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val action = Notification.Action.Builder(
+            Icon.createWithResource(this, android.R.drawable.ic_secure),
+            getString(R.string.action_disconnect),
+            stopPendingIntent
+        ).build()
+
+        // 🚀 Using native Notification.Builder to unlock Android 16 APIs cleanly
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_secure)
             .setOngoing(true)
-            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
-            .addAction(0, getString(R.string.action_disconnect), stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            .addAction(action)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
+        // 🚀 Android 16 (API 36) Promoted Ongoing & Live Updates Implementation
+        if (Build.VERSION.SDK_INT >= 36) {
+            val extras = Bundle()
+            extras.putBoolean("android.requestPromotedOngoing", true)
+            builder.addExtras(extras)
+
+            if (chipText != null) {
+                try {
+                    // Reflection bypasses compilation restrictions when targetSdk < 36
+                    builder.javaClass.getMethod("setShortCriticalText", CharSequence::class.java).invoke(builder, chipText)
+                } catch (e: Exception) {
+                    Log.w("UmbraProxy", "Android 16 Live Updates API mapping failed", e)
+                }
+            }
+        }
+
+        return builder.build()
     }
 
     private fun stopProxyInternal() {
@@ -264,7 +291,7 @@ class ProxyService : Service() {
 
         serviceScope.launch {
             reconnectMutex.withLock {
-                updateNotification(getString(R.string.service_stopping))
+                updateNotification(getString(R.string.service_stopping), "Stopping...")
                 withContext(Dispatchers.IO) {
                     NativeProxy.stopProxy()
                 }
