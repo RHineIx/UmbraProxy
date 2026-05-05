@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -231,14 +232,15 @@ class ProxyService : Service() {
         return stats.substringAfter(key, "").substringBefore(" ", "0")
     }
 
-    private fun updateNotification(content: String, chipText: String? = null) {
+    private fun updateNotification(content: String, chipText: String? = null): Notification {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, createNotification(content, chipText))
+            manager.notify(NOTIFICATION_ID, buildNotification(content, chipText))
         } catch (e: Exception) { Log.w("UmbraProxy", "Failed to notify", e) }
+        return buildNotification(content, chipText)
     }
 
-    private fun createNotification(content: String, chipText: String? = null): Notification {
+    private fun buildNotification(content: String, chipText: String? = null): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
@@ -251,11 +253,12 @@ class ProxyService : Service() {
             stopPendingIntent
         ).build()
 
-        // 🚀 Using native Notification.Builder to unlock Android 16 APIs cleanly
+        // 🚀 Native Notification Builder explicitly set with CATEGORY_SERVICE
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_secure)
+            .setCategory(Notification.CATEGORY_SERVICE) // 🚀 CRITICAL for Android 16 Promoted Ongoing
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
@@ -265,23 +268,22 @@ class ProxyService : Service() {
             builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         }
 
-        // 🚀 Android 16 (API 36) Promoted Ongoing & Live Updates Implementation
+        // 🚀 Direct Android 16 APIs (No reflection required since compileSdk = 36)
         if (Build.VERSION.SDK_INT >= 36) {
             val extras = Bundle()
             extras.putBoolean("android.requestPromotedOngoing", true)
             builder.addExtras(extras)
 
             if (chipText != null) {
-                try {
-                    // Reflection bypasses compilation restrictions when targetSdk < 36
-                    builder.javaClass.getMethod("setShortCriticalText", CharSequence::class.java).invoke(builder, chipText)
-                } catch (e: Exception) {
-                    Log.w("UmbraProxy", "Android 16 Live Updates API mapping failed", e)
-                }
+                builder.setShortCriticalText(chipText) // 🚀 Type-safe direct call
             }
         }
 
         return builder.build()
+    }
+
+    private fun createNotification(content: String, chipText: String? = null): Notification {
+        return buildNotification(content, chipText)
     }
 
     private fun stopProxyInternal() {

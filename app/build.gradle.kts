@@ -7,14 +7,16 @@ plugins {
 
 android {
     namespace = "io.github.umbraproxy"
-    compileSdk = 35
+    // 🚀 BUMPED: Upgraded to API 36 to unlock Android 16 Promoted Ongoing APIs natively
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.umbraproxy"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "1.4.1"
+        // 🚀 BUMPED: Tells the OS this app is fully compliant with Android 16 UI features
+        targetSdk = 36
+        versionCode = 7
+        versionName = "1.4.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -115,7 +117,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.18.0") // 🚀 Using updated core-ktx for modern APIs
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
