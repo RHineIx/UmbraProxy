@@ -7,6 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -15,6 +19,8 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -31,6 +37,19 @@ class ProxyService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var statsUpdateJob: Job? = null
     private var watchdogJob: Job? = null
+
+    private var lastPort: Int = 1443
+    private var lastCfEnabled: Boolean = true
+    private var lastCfDomain: String = ""
+    private var lastFakeTlsEnabled: Boolean = false
+    private var lastFakeTlsDomain: String = ""
+    private var lastSecret: String = ""
+    private var lastDcIps: String = ""
+
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var reconnectJob: Job? = null
+    private val reconnectMutex = Mutex()
 
     companion object {
         private const val CHANNEL_ID = "UmbraProxyCore"
@@ -49,7 +68,7 @@ class ProxyService : Service() {
 
         fun updateState(running: Boolean) {
             _isRunning.value = running
-            _isStarting.value = false // Ensure starting state is cleared
+            _isStarting.value = false
             if (!running) {
                 _liveStats.value = ProxyStats()
             }
@@ -59,6 +78,66 @@ class ProxyService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        setupNetworkMonitor()
+    }
+
+    private fun setupNetworkMonitor() {
+        try {
+            connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    scheduleSoftRestart("Network Available (Switched interface)")
+                }
+                override fun onLost(network: Network) {
+                    scheduleSoftRestart("Network Lost")
+                }
+            }
+            connectivityManager?.registerNetworkCallback(request, networkCallback!!)
+            Log.i("UmbraProxy", "Network monitor registered successfully")
+        } catch (e: Exception) {
+            Log.e("UmbraProxy", "Failed to setup network monitor", e)
+        }
+    }
+
+    private fun scheduleSoftRestart(reason: String) {
+        if (!_isRunning.value) return
+
+        reconnectJob?.cancel()
+        reconnectJob = serviceScope.launch {
+            delay(1500)
+
+            reconnectMutex.withLock {
+                if (!_isRunning.value) return@withLock
+
+                Log.i("UmbraProxy", "Triggering soft restart due to: $reason")
+                _isStarting.value = true
+                updateNotification(getString(R.string.status_connecting))
+
+                withContext(Dispatchers.IO) {
+                    NativeProxy.stopProxy()
+                    val success = NativeProxy.startProxy(
+                        lastPort, lastCfEnabled, lastCfDomain, 
+                        lastFakeTlsEnabled, lastFakeTlsDomain, 
+                        lastSecret, lastDcIps
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        if (success) {
+                            _isStarting.value = false
+                            Log.i("UmbraProxy", "Soft restart completed successfully")
+                            startWatchdogAndStats(lastPort)
+                        } else {
+                            Log.e("UmbraProxy", "Soft restart failed, initiating full shutdown")
+                            stopProxyInternal()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,25 +151,27 @@ class ProxyService : Service() {
             return START_STICKY
         }
 
-        val port = intent?.getIntExtra("PORT", 1443) ?: 1443
-        val cfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
-        val cfDomain = intent?.getStringExtra("CF_DOMAIN") ?: ""
-        val fakeTlsEnabled = intent?.getBooleanExtra("FAKE_TLS_ENABLED", false) ?: false
-        val fakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
-        val secret = intent?.getStringExtra("SECRET") ?: ""
-        val dcIps = intent?.getStringExtra("DC_IPS") ?: ""
+        lastPort = intent?.getIntExtra("PORT", 1443) ?: 1443
+        lastCfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
+        lastCfDomain = intent?.getStringExtra("CF_DOMAIN") ?: ""
+        lastFakeTlsEnabled = intent?.getBooleanExtra("FAKE_TLS_ENABLED", false) ?: false
+        lastFakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
+        lastSecret = intent?.getStringExtra("SECRET") ?: ""
+        lastDcIps = intent?.getStringExtra("DC_IPS") ?: ""
 
         _isStarting.value = true
 
         startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting)))
         acquireWakeLock()
 
-        CoroutineScope(Dispatchers.IO).launch {
-            val success = NativeProxy.startProxy(port, cfEnabled, cfDomain, fakeTlsEnabled, fakeTlsDomain, secret, dcIps)
-            withContext(Dispatchers.Main) {
+        serviceScope.launch {
+            reconnectMutex.withLock {
+                val success = withContext(Dispatchers.IO) {
+                    NativeProxy.startProxy(lastPort, lastCfEnabled, lastCfDomain, lastFakeTlsEnabled, lastFakeTlsDomain, lastSecret, lastDcIps)
+                }
                 if (success) {
                     updateState(true)
-                    startWatchdogAndStats(port)
+                    startWatchdogAndStats(lastPort)
                 } else {
                     _isStarting.value = false
                     stopSelf()
@@ -179,22 +260,30 @@ class ProxyService : Service() {
     private fun stopProxyInternal() {
         statsUpdateJob?.cancel()
         watchdogJob?.cancel()
+        reconnectJob?.cancel()
 
         serviceScope.launch {
-            updateNotification(getString(R.string.service_stopping))
-            withContext(Dispatchers.IO) {
-                NativeProxy.stopProxy()
+            reconnectMutex.withLock {
+                updateNotification(getString(R.string.service_stopping))
+                withContext(Dispatchers.IO) {
+                    NativeProxy.stopProxy()
+                }
+                updateState(false)
+                releaseWakeLock()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
-            updateState(false)
-            releaseWakeLock()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
         }
     }
 
     override fun onDestroy() {
         serviceJob.cancel()
         releaseWakeLock()
+        try {
+            networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        } catch (e: Exception) {
+            Log.w("UmbraProxy", "Failed to unregister network callback", e)
+        }
         super.onDestroy()
     }
 
