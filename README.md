@@ -1,0 +1,98 @@
+# UmbraProxy
+
+Android MTProto proxy for Telegram, built with Kotlin/Jetpack Compose and a Go core
+loaded through JNA. The listener binds to `127.0.0.1`, so Telegram must run on the
+same device. This is a Telegram proxy, not a device-wide VPN.
+
+**[التقييم التقني وخطة التطوير بالعربية](docs/REVIEW_AR.md)**
+
+## Features
+
+- Telegram WebSocket transport with optional third-party Cloudflare routing and TCP fallback.
+- Optional FakeTLS transport camouflage and generated 128-bit proxy secrets.
+- Foreground service, default-network change detection, Quick Settings tile, and optional boot startup.
+- English/Arabic resources, light/dark/system themes, live counters, and bounded UI logs.
+
+“Proxy running” means the local listener started. It does not prove Telegram is
+reachable. FakeTLS provides transport camouflage; it is not a guarantee of
+anonymity. Third-party routing availability depends on the configured providers.
+
+## Build
+
+Requirements: JDK 17, Go 1.26 (latest patch recommended), Android SDK Platform 35,
+Build Tools 36.0.0, and Android NDK `27.2.12479018`. Linux and macOS are supported by
+the native build script. The app supports Android 8.0+ and ARM64/ARMv7 devices.
+
+```sh
+export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+sdkmanager 'platforms;android-35' 'build-tools;36.0.0' 'ndk;27.2.12479018'
+bash scripts/build-native.sh
+bash gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+Set `JAVA_HOME` to JDK 17 and put Go on `PATH`. Alternatively, set `sdk.dir` in an
+untracked `local.properties`. Build the native libraries again after Go changes;
+Gradle does not compile the Go core automatically. APK packaging checks that both
+`libumbraproxy.so` files exist in `app/src/main/jniLibs/`, but you must rebuild
+them after Go changes to avoid packaging stale libraries.
+
+The script targets native API 26, matching `minSdk`, and requests 16 KB ELF load
+segment alignment. JNA is updated to 5.19.1. Test the packaged APK on a 16 KB page
+size device before claiming runtime compatibility.
+
+## Verify
+
+```sh
+go test -race -cover ./...
+go vet ./...
+go test -run='^$' -fuzz=FuzzUpgradeParser -fuzztime=10s -parallel=2
+bash gradlew testDebugUnitTest lintDebug
+```
+
+Tests use loopback connections and do not depend on live Telegram servers. The
+Go module uses only the standard library. `go.sum` is not needed until external
+Go dependencies are added. The optional desktop entry point now requires a valid
+`UMBRA_PROXY_SECRET` environment variable; it no longer starts with a known
+default secret.
+
+## Connect
+
+1. Open the app and start the proxy.
+2. Tap **Launch Telegram** to apply the local proxy link.
+3. Confirm connectivity in Telegram. The local listener can be healthy while all
+   upstream routes are unavailable.
+
+Custom routing domains are base domains that must provide the expected
+`kws<dc>.<base-domain>` endpoints and valid certificates. Enter a hostname, without
+`https://`, a port, or a path. FakeTLS requires a valid SNI domain. Invalid saved
+secrets are replaced atomically with fresh random secrets; existing Telegram
+proxy entries must then be updated.
+
+The connection pool selector is hidden because the existing pool is not connected
+to the client transport path. Its implementation remains available for future
+work. Boot startup is optional and subject to Android/vendor background limits.
+
+## Releases
+
+Pull requests and pushes to `master` run Go checks and Android unit tests, lint,
+and debug APK assembly. The manual release workflow builds **unsigned candidates**
+and prepares a **draft** release using the app version. It does not publish a
+production update. The previous workflow uploaded unsigned APKs as normal releases.
+
+For a locally signed release, set these properties in untracked `local.properties`:
+
+```properties
+KEYSTORE_FILE=/absolute/path/to/your-existing-release-key.jks
+KEYSTORE_PASSWORD=...
+KEY_ALIAS=...
+KEY_PASSWORD=...
+```
+
+Run `bash gradlew assembleRelease` after building the native libraries. Use the
+existing app signing key for updates, increment `versionCode`/`versionName` when
+preparing a production release, and verify signing and installation before
+publishing. Keep signing keys and proxy secrets out of source control.
+
+The repository does not currently declare a license. Confirm the provenance and
+license of reused core code before public redistribution.

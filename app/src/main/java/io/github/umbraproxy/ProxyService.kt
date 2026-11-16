@@ -10,7 +10,6 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -38,6 +37,8 @@ class ProxyService : Service() {
     private var statsUpdateJob: Job? = null
     private var watchdogJob: Job? = null
 
+    @Volatile private var stopping = false
+    private var lastPoolSize = 4
     private var lastPort: Int = 1443
     private var lastCfEnabled: Boolean = true
     private var lastCfDomain: String = ""
@@ -84,19 +85,28 @@ class ProxyService : Service() {
     private fun setupNetworkMonitor() {
         try {
             connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-
             networkCallback = object : ConnectivityManager.NetworkCallback() {
+                private var previousNetwork: Network? = null
+                private var networkLost = false
+
                 override fun onAvailable(network: Network) {
-                    scheduleSoftRestart("Network Available (Switched interface)")
+                    // Android invokes callbacks off the main thread. Serialize state and
+                    // debounce jobs with the rest of the service on Dispatchers.Main.
+                    serviceScope.launch {
+                        val changed = previousNetwork != null && (previousNetwork != network || networkLost)
+                        previousNetwork = network
+                        networkLost = false
+                        if (changed) scheduleSoftRestart("Default network changed")
+                    }
                 }
+
                 override fun onLost(network: Network) {
-                    scheduleSoftRestart("Network Lost")
+                    serviceScope.launch {
+                        if (previousNetwork == network) networkLost = true
+                    }
                 }
             }
-            connectivityManager?.registerNetworkCallback(request, networkCallback!!)
+            connectivityManager?.registerDefaultNetworkCallback(networkCallback!!)
             Log.i("UmbraProxy", "Network monitor registered successfully")
         } catch (e: Exception) {
             Log.e("UmbraProxy", "Failed to setup network monitor", e)
@@ -104,33 +114,33 @@ class ProxyService : Service() {
     }
 
     private fun scheduleSoftRestart(reason: String) {
-        if (!_isRunning.value) return
+        if (stopping || !_isRunning.value) return
 
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
             delay(1500)
 
             reconnectMutex.withLock {
-                if (!_isRunning.value) return@withLock
+                if (stopping || !_isRunning.value) return@withLock
 
                 Log.i("UmbraProxy", "Triggering soft restart due to: $reason")
                 _isStarting.value = true
                 updateNotification(getString(R.string.status_connecting))
 
                 withContext(Dispatchers.IO) {
-                    NativeProxy.stopProxy()
-                    val success = NativeProxy.startProxy(
-                        lastPort, lastCfEnabled, lastCfDomain, 
-                        lastFakeTlsEnabled, lastFakeTlsDomain, 
-                        lastSecret, lastDcIps
+                    val success = NativeProxy.restartProxy(
+                        lastPort, lastCfEnabled, lastCfDomain,
+                        lastFakeTlsEnabled, lastFakeTlsDomain,
+                        lastSecret, lastDcIps, lastPoolSize, cacheDir.absolutePath,
+                        shouldStart = { !stopping && serviceJob.isActive }
                     )
 
                     withContext(Dispatchers.Main) {
-                        if (success) {
+                        if (success && !stopping) {
                             _isStarting.value = false
                             Log.i("UmbraProxy", "Soft restart completed successfully")
                             startWatchdogAndStats(lastPort)
-                        } else {
+                        } else if (!success) {
                             Log.e("UmbraProxy", "Soft restart failed, initiating full shutdown")
                             stopProxyInternal()
                         }
@@ -146,18 +156,12 @@ class ProxyService : Service() {
             return START_NOT_STICKY
         }
 
+        if (stopping) return START_NOT_STICKY
+
         if (_isRunning.value || _isStarting.value) {
             Log.i("UmbraProxy", "Service already running or starting, ignoring duplicate intent.")
             return START_STICKY
         }
-
-        lastPort = intent?.getIntExtra("PORT", 1443) ?: 1443
-        lastCfEnabled = intent?.getBooleanExtra("CF_ENABLED", true) ?: true
-        lastCfDomain = intent?.getStringExtra("CF_DOMAIN") ?: ""
-        lastFakeTlsEnabled = intent?.getBooleanExtra("FAKE_TLS_ENABLED", false) ?: false
-        lastFakeTlsDomain = intent?.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
-        lastSecret = intent?.getStringExtra("SECRET") ?: ""
-        lastDcIps = intent?.getStringExtra("DC_IPS") ?: ""
 
         _isStarting.value = true
 
@@ -165,17 +169,41 @@ class ProxyService : Service() {
         acquireWakeLock()
 
         serviceScope.launch {
-            reconnectMutex.withLock {
-                val success = withContext(Dispatchers.IO) {
-                    NativeProxy.startProxy(lastPort, lastCfEnabled, lastCfDomain, lastFakeTlsEnabled, lastFakeTlsDomain, lastSecret, lastDcIps)
+            try {
+                reconnectMutex.withLock {
+                    // A sticky restart has a null Intent; restore the saved secret and
+                    // routing instead of silently starting with defaults.
+                    val startIntent = intent ?: ProxyController.createStartIntent(this@ProxyService)
+                    if (startIntent == null || stopping) {
+                        stopProxyInternal()
+                        return@withLock
+                    }
+                    lastPort = startIntent.getIntExtra("PORT", 1443)
+                    lastCfEnabled = startIntent.getBooleanExtra("CF_ENABLED", true)
+                    lastCfDomain = startIntent.getStringExtra("CF_DOMAIN") ?: ""
+                    lastFakeTlsEnabled = startIntent.getBooleanExtra("FAKE_TLS_ENABLED", false)
+                    lastFakeTlsDomain = startIntent.getStringExtra("FAKE_TLS_DOMAIN") ?: ""
+                    lastSecret = startIntent.getStringExtra("SECRET") ?: ""
+                    lastDcIps = startIntent.getStringExtra("DC_IPS") ?: ""
+
+                    lastPoolSize = startIntent.getIntExtra("POOL_SIZE", 4)
+                    val success = withContext(Dispatchers.IO) {
+                        NativeProxy.startProxy(lastPort, lastCfEnabled, lastCfDomain, lastFakeTlsEnabled, lastFakeTlsDomain, lastSecret, lastDcIps, lastPoolSize, cacheDir.absolutePath,
+                            shouldStart = { !stopping && serviceJob.isActive })
+                    }
+                    if (success && !stopping) {
+                        updateState(true)
+                        startWatchdogAndStats(lastPort)
+                    } else {
+                        _isStarting.value = false
+                        stopSelf()
+                    }
                 }
-                if (success) {
-                    updateState(true)
-                    startWatchdogAndStats(lastPort)
-                } else {
-                    _isStarting.value = false
-                    stopSelf()
-                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("UmbraProxy", "Unable to restore proxy settings", e)
+                stopProxyInternal()
             }
         }
 
@@ -227,7 +255,7 @@ class ProxyService : Service() {
     }
 
     private fun extractValue(stats: String, key: String): String {
-        return stats.substringAfter(key, "").substringBefore(" ", "0")
+        return stats.substringAfter(key, "").substringBefore(' ').ifBlank { "0" }
     }
 
     private fun updateNotification(content: String) {
@@ -258,6 +286,9 @@ class ProxyService : Service() {
     }
 
     private fun stopProxyInternal() {
+        if (stopping) return
+        stopping = true
+        updateState(false)
         statsUpdateJob?.cancel()
         watchdogJob?.cancel()
         reconnectJob?.cancel()
@@ -277,7 +308,12 @@ class ProxyService : Service() {
     }
 
     override fun onDestroy() {
+        stopping = true
         serviceJob.cancel()
+        // Native start/stop are serialized, so destruction cannot leave a late
+        // startup running without its foreground notification.
+        NativeProxy.stopProxy()
+        updateState(false)
         releaseWakeLock()
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }

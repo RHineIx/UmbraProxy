@@ -1,5 +1,6 @@
 # ═══ Android / Gradle ═══
 .gradle/
+.kotlin/
 build/
 captures/
 .externalNativeBuild/
@@ -31,7 +32,6 @@ bin/
 *.out
 # Specific to Go build artifacts
 tg-ws-proxy.h
-go.sum
 
 # ═══ JNI / Native Libraries ═══
 # We usually keep the production .so in jniLibs, 

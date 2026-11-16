@@ -2,13 +2,29 @@ package io.github.umbraproxy
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.widget.Toast
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.util.Log
 
 object ProxyController {
 
-    suspend fun startFromSavedSettings(context: Context, showInvalidPortToast: Boolean = false) {
+    suspend fun startFromSavedSettings(context: Context, showInvalidPortToast: Boolean = false): Boolean {
+        val intent = createStartIntent(context, showInvalidPortToast) ?: return false
+        return try {
+            context.startForegroundService(intent)
+            true
+        } catch (e: IllegalStateException) {
+            Log.e("UmbraProxy", "Android refused to start the foreground service", e)
+            false
+        } catch (e: SecurityException) {
+            Log.e("UmbraProxy", "Missing permission to start the foreground service", e)
+            false
+        }
+    }
+
+    suspend fun createStartIntent(context: Context, showInvalidPortToast: Boolean = false): Intent? {
         val settingsStore = SettingsStore(context)
         val portText = settingsStore.port.first()
         val port = portText.toIntOrNull()
@@ -16,10 +32,18 @@ object ProxyController {
         
         val customCfEnabled = settingsStore.customCfDomainEnabled.first()
         val customCfDomainStr = settingsStore.customCfDomain.first()
-        val finalCfDomain = if (customCfEnabled && customCfDomainStr.isNotBlank()) customCfDomainStr else ""
+        val finalCfDomain = if (customCfEnabled) customCfDomainStr.trim() else ""
 
         val fakeTlsEnabled = settingsStore.fakeTlsEnabled.first()
-        val fakeTlsDomain = settingsStore.fakeTlsDomain.first()
+        val fakeTlsDomain = settingsStore.fakeTlsDomain.first().trim()
+
+        if ((customCfEnabled && !ProxyConfiguration.isValidDomain(finalCfDomain)) ||
+            (fakeTlsEnabled && !ProxyConfiguration.isValidDomain(fakeTlsDomain))) {
+            if (showInvalidPortToast) withContext(Dispatchers.Main) {
+                Toast.makeText(context, R.string.msg_invalid_domain, Toast.LENGTH_SHORT).show()
+            }
+            return null
+        }
 
         val isDcAuto = settingsStore.isDcAuto.first()
         val dcIps = if (isDcAuto) {
@@ -30,18 +54,15 @@ object ProxyController {
             "2:$dc2,-2:$dc2,4:$dc4,-4:$dc4"
         }
 
-        var secretKey = settingsStore.secretKey.first()
-
-        if (secretKey.length != 32) {
-            secretKey = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 32)
-            settingsStore.saveSecretKey(secretKey)
-        }
+        val secretKey = settingsStore.ensureSecretKey()
 
         if (port == null || port !in 1..65535) {
             if (showInvalidPortToast) {
-                Toast.makeText(context, "Invalid port: $portText", Toast.LENGTH_SHORT).show()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, context.getString(R.string.msg_invalid_port, portText), Toast.LENGTH_SHORT).show()
+                }
             }
-            return
+            return null
         }
 
         val intent = Intent(context, ProxyService::class.java).apply {
@@ -52,13 +73,9 @@ object ProxyController {
             putExtra("FAKE_TLS_DOMAIN", fakeTlsDomain)
             putExtra("SECRET", secretKey)
             putExtra("DC_IPS", dcIps)
+            putExtra("POOL_SIZE", settingsStore.poolSize.first())
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
+        return intent
     }
 
     fun stop(context: Context) {

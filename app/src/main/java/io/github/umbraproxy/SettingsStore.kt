@@ -114,7 +114,17 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun saveSecretKey(key: String) {
+        require(ProxyConfiguration.isValidSecret(key))
         context.dataStore.edit { it[Keys.SECRET_KEY] = key }
+    }
+
+    suspend fun ensureSecretKey(): String {
+        val preferences = context.dataStore.edit {
+            if (!ProxyConfiguration.isValidSecret(it[Keys.SECRET_KEY].orEmpty())) {
+                it[Keys.SECRET_KEY] = ProxyConfiguration.generateSecret()
+            }
+        }
+        return requireNotNull(preferences[Keys.SECRET_KEY])
     }
 
     suspend fun saveLogFilters(debug: Boolean, info: Boolean, error: Boolean, isNull: Boolean) {
@@ -176,7 +186,7 @@ class SettingsStore(private val context: Context) {
             it[Keys.CUSTOM_CF_DOMAIN] = customCfDomain
             it[Keys.FAKE_TLS_ENABLED] = fakeTlsEnabled
             it[Keys.FAKE_TLS_DOMAIN] = fakeTlsDomain
-            if(secretKey.isNotBlank()) {
+            if(ProxyConfiguration.isValidSecret(secretKey)) {
                 it[Keys.SECRET_KEY] = secretKey
             }
         }
