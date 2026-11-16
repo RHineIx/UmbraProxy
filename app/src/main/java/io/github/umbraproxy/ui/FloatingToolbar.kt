@@ -117,7 +117,7 @@ fun FloatingToolbar(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_palette),
+                    painter = painterResource(id = R.drawable.ic_tabler_palette),
                     contentDescription = stringResource(R.string.theme_title),
                     modifier = Modifier.size(22.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
@@ -164,19 +164,19 @@ fun FloatingToolbar(
                     )
 
                     ThemeOption(
-                        icon = R.drawable.ic_auto,
+                        icon = R.drawable.ic_tabler_device_desktop,
                         label = stringResource(R.string.theme_system),
                         selected = currentTheme == "system",
                         onClick = { onThemeChange("system"); isExpanded = false }
                     )
                     ThemeOption(
-                        icon = R.drawable.ic_light_mode,
+                        icon = R.drawable.ic_tabler_sun,
                         label = stringResource(R.string.theme_light),
                         selected = currentTheme == "light",
                         onClick = { onThemeChange("light"); isExpanded = false }
                     )
                     ThemeOption(
-                        icon = R.drawable.ic_dark_mode,
+                        icon = R.drawable.ic_tabler_moon,
                         label = stringResource(R.string.theme_dark),
                         selected = currentTheme == "dark",
                         onClick = { onThemeChange("dark"); isExpanded = false }

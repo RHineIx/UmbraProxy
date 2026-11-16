@@ -19,9 +19,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -136,7 +134,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
             Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                 TopAppBar(
                     title = { Text(stringResource(R.string.title_system_logs), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.logs_back)) } },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_tabler_arrow_left), stringResource(R.string.logs_back)) } },
                     actions = {
                         IconButton(enabled = filtered.isNotEmpty(), onClick = {
                             val selected = filtered.toList()
@@ -154,10 +152,10 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                                 } catch (e: CancellationException) { throw e }
                                 catch (e: Exception) { AppLog.e("Logs", "Copying logs failed", e); toast(R.string.logs_action_failed) }
                             }
-                        }) { Icon(Icons.Default.ContentCopy, stringResource(R.string.logs_copy)) }
+                        }) { Icon(painterResource(R.drawable.ic_tabler_copy), stringResource(R.string.logs_copy)) }
                         Box {
                             IconButton(enabled = filtered.isNotEmpty(), onClick = { exportMenu = true }) {
-                                Icon(Icons.Default.FileDownload, stringResource(R.string.logs_export))
+                                Icon(painterResource(R.drawable.ic_tabler_download), stringResource(R.string.logs_export))
                             }
                             DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
                                 DropdownMenuItem(text = { Text(stringResource(R.string.logs_export_text)) }, onClick = { export(LogExportFormat.TEXT) })
@@ -169,7 +167,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                                 LogManager.clearLogs().onSuccess { frozen = LogManager.snapshot.value }
                                     .onFailure { AppLog.e("Logs", "Clearing log history failed", it); toast(R.string.logs_action_failed) }
                             }
-                        }) { Icon(Icons.Default.DeleteOutline, stringResource(R.string.btn_clear_logs)) }
+                        }) { Icon(painterResource(R.drawable.ic_tabler_trash), stringResource(R.string.btn_clear_logs)) }
                     }
                 )
                 // Keep the console visible on short windows and with large fonts.
@@ -177,8 +175,8 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                     OutlinedTextField(
                         value = query, onValueChange = { query = it }, singleLine = true,
                         label = { Text(stringResource(R.string.logs_search)) },
-                        leadingIcon = { Icon(Icons.Default.Search, null) },
-                        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, stringResource(R.string.logs_clear_search)) } },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_tabler_search), null) },
+                        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(painterResource(R.drawable.ic_tabler_x), stringResource(R.string.logs_clear_search)) } },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
                     )
                     LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -192,12 +190,12 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
                     }
                     FlowRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { if (!paused) frozen = snapshot; paused = !paused }) {
-                            Icon(if (paused) Icons.Default.PlayArrow else Icons.Default.Pause, null, modifier = Modifier.size(18.dp))
+                            Icon(painterResource(if (paused) R.drawable.ic_tabler_player_play else R.drawable.ic_tabler_player_pause), null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(if (paused) R.string.logs_resume else R.string.logs_pause))
                         }
                         TextButton(onClick = { followTail = !followTail }, colors = ButtonDefaults.textButtonColors(contentColor = if (followTail) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)) {
-                            Icon(Icons.Default.VerticalAlignBottom, null, modifier = Modifier.size(18.dp))
+                            Icon(painterResource(R.drawable.ic_tabler_arrow_bar_to_down), null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(if (followTail) R.string.logs_following else R.string.logs_follow))
                         }
@@ -233,7 +231,7 @@ fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
             if (filtered.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Terminal, null, tint = ConsoleMuted, modifier = Modifier.size(42.dp))
+                        Icon(painterResource(R.drawable.ic_tabler_terminal_2), null, tint = ConsoleMuted, modifier = Modifier.size(42.dp))
                         Spacer(Modifier.height(16.dp))
                         Text(stringResource(if (shownSnapshot.entries.isEmpty()) R.string.logs_empty else R.string.logs_no_matches), color = ConsoleText)
                         Spacer(Modifier.height(8.dp))

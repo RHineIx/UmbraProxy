@@ -41,11 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -265,7 +260,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                         statusBarManager.requestAddTileService(
                             componentName,
                             context.getString(R.string.app_name),
-                            AndroidIcon.createWithResource(context, R.drawable.tile),
+                            AndroidIcon.createWithResource(context, R.drawable.ic_tabler_shield_lock),
                             context.mainExecutor
                         ) {}
                     }
@@ -297,7 +292,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                 horizontalArrangement = Arrangement.End
             ) {
                 IconButton(onClick = onOpenLogs) {
-                    Icon(Icons.Default.Terminal, contentDescription = stringResource(R.string.tooltip_view_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(painterResource(R.drawable.ic_tabler_terminal_2), contentDescription = stringResource(R.string.tooltip_view_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -405,7 +400,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().clickable(enabled = !isRunning && !isStarting) { isAdvancedExpanded = !isAdvancedExpanded }.padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.label_advanced_dc), style = MaterialTheme.typography.bodyLarge)
-                            Icon(imageVector = if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(painter = painterResource(if (isAdvancedExpanded) R.drawable.ic_tabler_chevron_up else R.drawable.ic_tabler_chevron_down), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         }
                         AnimatedVisibility(visible = isAdvancedExpanded) {
                             Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -463,14 +458,14 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     cb.setPrimaryClip(ClipData.newPlainText("Proxy", proxyUrl))
                     Toast.makeText(context, context.getString(R.string.msg_copied_clipboard), Toast.LENGTH_SHORT).show()
                 }, enabled = fullSecretPrefix.isNotEmpty(), modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(16.dp)) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Icon(painterResource(R.drawable.ic_tabler_copy), contentDescription = null, modifier = Modifier.size(20.dp))
                 }
                 Button(onClick = {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(proxyUrl))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { context.startActivity(intent) } catch (e: Exception) { Toast.makeText(context, context.getString(R.string.msg_tg_not_installed), Toast.LENGTH_SHORT).show() }
                 }, enabled = isRunning, modifier = Modifier.weight(3f).height(56.dp), shape = RoundedCornerShape(16.dp)) {
-                    Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Icon(painter = painterResource(id = R.drawable.ic_tabler_brand_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.btn_launch_telegram), style = MaterialTheme.typography.titleMedium)
                 }
             }
@@ -508,7 +503,7 @@ fun MainConnectionToggle(isRunning: Boolean, isStarting: Boolean, onClick: () ->
     Surface(modifier = Modifier.size(140.dp).scale(scale).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         shape = CircleShape, color = buttonColor, shadowElevation = if (isActiveVisual) 12.dp else 2.dp) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, tint = iconColor, modifier = Modifier.size(68.dp).offset(x = (-4).dp, y = 2.dp))
+            Icon(painter = painterResource(id = R.drawable.ic_tabler_brand_telegram), contentDescription = null, tint = iconColor, modifier = Modifier.size(68.dp))
         }
     }
 }
