@@ -76,9 +76,37 @@ work. Boot startup is optional and subject to Android/vendor background limits.
 ## Releases
 
 Pull requests and pushes to `master` run Go checks and Android unit tests, lint,
-and debug APK assembly. The manual release workflow builds **unsigned candidates**
-and prepares a **draft** release using the app version. It does not publish a
-production update. The previous workflow uploaded unsigned APKs as normal releases.
+and debug APK assembly. Creating and pushing a new tag such as `v1.4.2` runs the
+release workflow, builds and verifies all three APKs (ARM64, ARMv7, and universal),
+signs them, and publishes a GitHub Release with generated notes and SHA-256
+checksums. Tags with a suffix such as `v1.4.2-rc.1` publish a prerelease. The tag
+must include the updated workflow and native build script.
+
+Configure these repository **Actions secrets** using the existing production
+signing key, with the same names used by Penumbra:
+
+- `KEYSTORE_BASE64`: base64-encoded signing keystore.
+- `KEYSTORE_PASSWORD`: keystore password.
+- `KEY_ALIAS`: signing key alias.
+- `KEY_PASSWORD`: signing key password.
+
+The workflow fails before building if any signing secret is missing. It does not
+fall back to unsigned APKs or a generated signing key. Repository secrets are
+configured separately for each repository; Penumbra's secrets are not copied.
+The temporary keystore is deleted even if a step fails.
+
+```sh
+git tag v1.4.2
+git push origin v1.4.2
+```
+
+The APK `versionName` comes from the tag without `v`; `versionCode` is `5` (the
+previous application code) plus the number of fetched `v*` tags, following the
+Penumbra workflow's counting scheme. Keep release tags and create them in release
+order so version codes increase. The manual workflow accepts an **existing tag**
+for rebuilding a release; the checkout must match that tag's commit. It does not
+create or move tags. Rebuilding an older tag after adding more tags recalculates
+its version code from the current count.
 
 For a locally signed release, set these properties in untracked `local.properties`:
 
@@ -90,9 +118,9 @@ KEY_PASSWORD=...
 ```
 
 Run `bash gradlew assembleRelease` after building the native libraries. Use the
-existing app signing key for updates, increment `versionCode`/`versionName` when
-preparing a production release, and verify signing and installation before
-publishing. Keep signing keys and proxy secrets out of source control.
+existing app signing key for updates. For local version overrides, pass
+`-PAPP_VERSION_NAME=1.4.2 -PAPP_VERSION_CODE=100` (choose a code higher than your
+last published build). Verify signing and installation before publishing. Keep signing keys and proxy secrets out of source control.
 
 The repository does not currently declare a license. Confirm the provenance and
 license of reused core code before public redistribution.

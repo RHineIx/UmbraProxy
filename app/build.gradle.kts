@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.umbraproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4.1"
+        versionCode = providers.gradleProperty("APP_VERSION_CODE").orElse("5").get().toInt()
+        versionName = providers.gradleProperty("APP_VERSION_NAME").orElse("1.4.1").get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
