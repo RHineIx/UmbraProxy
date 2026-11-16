@@ -24,6 +24,7 @@ import (
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -95,7 +96,7 @@ var (
 	recvBuf    = defaultRecvBuf
 	sendBuf    = defaultSendBuf
 	poolSize   atomic.Int32
-	logVerbose = false
+	logVerbose atomic.Bool
 )
 
 type cfproxy429State struct {
@@ -124,7 +125,7 @@ const cfproxyDomainsURL = "https://raw.githubusercontent.com/Flowseal/tg-ws-prox
 
 // MTProto proxy secret (hex, 32 chars = 16 bytes)
 var (
-	proxySecret   = "00000000000000000000000000000000"
+	proxySecret   string
 	proxySecretMu sync.RWMutex
 )
 
@@ -199,10 +200,10 @@ func resolveFallbackTarget(dc int, isMedia bool) string {
 // ---------------------------------------------------------------------------
 
 var (
-	logInfo  *log.Logger
-	logWarn  *log.Logger
-	logError *log.Logger
-	logDebug *log.Logger
+	logInfo  = log.New(androidLogWriter{}, "", 0)
+	logWarn  = log.New(androidLogWriter{}, "[WARN] ", 0)
+	logError = log.New(androidLogWriter{}, "[ERROR] ", 0)
+	logDebug = log.New(debugLogWriter{}, "[DEBUG] ", 0)
 )
 
 type androidLogWriter struct{}
@@ -215,18 +216,17 @@ func (w androidLogWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func initLogging(verbose bool) {
-	logVerbose = verbose
-	flags := 0
-	out := androidLogWriter{}
-	logInfo = log.New(out, "", flags)
-	logWarn = log.New(out, "[WARN] ", flags)
-	logError = log.New(out, "[ERROR] ", flags)
-	if verbose {
-		logDebug = log.New(out, "[DEBUG] ", flags)
-	} else {
-		logDebug = log.New(io.Discard, "", 0)
+type debugLogWriter struct{}
+
+func (debugLogWriter) Write(p []byte) (int, error) {
+	if logVerbose.Load() {
+		return (androidLogWriter{}).Write(p)
 	}
+	return len(p), nil
+}
+
+func initLogging(verbose bool) {
+	logVerbose.Store(verbose)
 	signal.Ignore(syscall.SIGPIPE)
 }
 
@@ -262,10 +262,20 @@ func decodeCfDomain(s string) string {
 }
 
 func normalizeCfDomain(s string) string {
-	decoded := strings.ToLower(strings.TrimSpace(decodeCfDomain(s)))
+	decoded := strings.ToLower(strings.TrimSpace(s))
 	decoded = strings.TrimSuffix(decoded, ".")
-	if decoded == "" || !strings.HasSuffix(decoded, ".co.uk") {
+	if len(decoded) == 0 || len(decoded) > 253 || !strings.Contains(decoded, ".") {
 		return ""
+	}
+	for _, label := range strings.Split(decoded, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, char := range label {
+			if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-') {
+				return ""
+			}
+		}
 	}
 	return decoded
 }
@@ -273,7 +283,7 @@ func normalizeCfDomain(s string) string {
 func defaultCfproxyDomains() []string {
 	domains := make([]string, 0, len(cfproxyEnc))
 	for _, enc := range cfproxyEnc {
-		if domain := normalizeCfDomain(enc); domain != "" {
+		if domain := normalizeCfDomain(decodeCfDomain(enc)); domain != "" {
 			domains = append(domains, domain)
 		}
 	}
@@ -616,7 +626,7 @@ func tryRefreshCfproxyDomains(ctx context.Context) bool {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if domain := normalizeCfDomain(line); domain != "" {
+		if domain := normalizeCfDomain(decodeCfDomain(line)); domain != "" {
 			newDomains = append(newDomains, domain)
 		}
 	}
@@ -812,6 +822,7 @@ func SafeClose(conn net.Conn) {
 
 var tlsConfigPool = &tls.Config{
 	ClientSessionCache: tls.NewLRUClientSessionCache(100),
+	MinVersion:         tls.VersionTLS12,
 }
 
 const (
@@ -845,6 +856,7 @@ type RawWebSocket struct {
 	bufReader *bufio.Reader
 	writeMu   sync.Mutex
 	closed    atomic.Bool
+	closeOnce sync.Once
 }
 
 type dohResponse struct {
@@ -1038,7 +1050,6 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 
 	tlsCfg := tlsConfigPool.Clone()
 	tlsCfg.ServerName = domain
-	tlsCfg.InsecureSkipVerify = true
 
 	targetAddr := net.JoinHostPort(dialAddr, "443")
 	rawConn, err := dialer.DialContext(ctx, "tcp", targetAddr)
@@ -1047,6 +1058,10 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 	}
 
 	setSockOpts(rawConn)
+	// Interrupt TLS and HTTP handshakes when the attempt is cancelled. Stop the
+	// hook before returning: callers cancel their attempt context after success.
+	stopCancel := context.AfterFunc(ctx, func() { rawConn.Close() })
+	defer stopCancel()
 
 	tlsConn := tls.Client(rawConn, tlsCfg)
 	handshakeTimeout := wsHandshakeTimeout(timeout)
@@ -1060,7 +1075,8 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 		return nil, err
 	}
 	_ = tlsConn.SetDeadline(time.Time{})
-	rawConn = tlsConn
+	// Keep the cancellation closure's raw socket immutable.
+	var conn net.Conn = tlsConn
 
 	wsKeyBytes := make([]byte, 16)
 	_, _ = rand.Read(wsKeyBytes)
@@ -1079,38 +1095,48 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 		path, domain, wsKey,
 	)
 
-	_ = rawConn.SetWriteDeadline(time.Now().Add(timeout))
-	if _, err = rawConn.Write([]byte(req)); err != nil {
+	_ = conn.SetWriteDeadline(time.Now().Add(timeout))
+	if _, err = conn.Write([]byte(req)); err != nil {
 		rawConn.Close()
 		return nil, err
 	}
-	_ = rawConn.SetWriteDeadline(time.Time{})
+	_ = conn.SetWriteDeadline(time.Time{})
 
-	bufReader := bufio.NewReaderSize(rawConn, 4096)
-	_ = rawConn.SetReadDeadline(time.Now().Add(timeout))
+	bufReader := bufio.NewReaderSize(conn, 4096)
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	if err := readWebSocketUpgrade(bufReader, wsKey); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	return &RawWebSocket{conn: conn, bufReader: bufReader}, nil
+}
 
+func readWebSocketUpgrade(reader *bufio.Reader, key string) error {
 	var responseLines []string
+	headerBytes := 0
 	for {
-		line, err := bufReader.ReadString('\n')
+		lineBytes, err := reader.ReadSlice('\n')
 		if err != nil {
-			rawConn.Close()
-			return nil, err
+			return fmt.Errorf("read WebSocket upgrade: %w", err)
 		}
+		headerBytes += len(lineBytes)
+		if headerBytes > 32*1024 {
+			return fmt.Errorf("HTTP headers too large")
+		}
+		line := string(lineBytes)
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
 			break
 		}
 		responseLines = append(responseLines, line)
 		if len(responseLines) > 100 {
-			rawConn.Close()
-			return nil, fmt.Errorf("too many HTTP headers")
+			return fmt.Errorf("too many HTTP headers")
 		}
 	}
-	_ = rawConn.SetReadDeadline(time.Time{})
 
 	if len(responseLines) == 0 {
-		rawConn.Close()
-		return nil, &WsHandshakeError{StatusCode: 0, StatusLine: "empty response"}
+		return &WsHandshakeError{StatusCode: 0, StatusLine: "empty response"}
 	}
 
 	firstLine := responseLines[0]
@@ -1120,22 +1146,48 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 		statusCode, _ = strconv.Atoi(parts[1])
 	}
 
-	if statusCode == 101 {
-		return &RawWebSocket{conn: rawConn, bufReader: bufReader}, nil
-	}
 	headers := make(map[string]string)
 	for _, hl := range responseLines[1:] {
 		if idx := strings.IndexByte(hl, ':'); idx >= 0 {
-			headers[strings.TrimSpace(strings.ToLower(hl[:idx]))] = strings.TrimSpace(hl[idx+1:])
+			name := strings.TrimSpace(strings.ToLower(hl[:idx]))
+			value := strings.TrimSpace(hl[idx+1:])
+			if previous, ok := headers[name]; ok {
+				value = previous + ", " + value
+			}
+			headers[name] = value
 		}
 	}
-	rawConn.Close()
-	return nil, &WsHandshakeError{
+	if statusCode == http.StatusSwitchingProtocols {
+		// SHA-1 is required by RFC 6455 for the upgrade challenge.
+		digest := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		accept := base64.StdEncoding.EncodeToString(digest[:])
+		if parts[0] != "HTTP/1.1" || !strings.EqualFold(headers["upgrade"], "websocket") ||
+			!hasHeaderToken(headers["connection"], "upgrade") || headers["sec-websocket-accept"] != accept {
+			return fmt.Errorf("invalid WebSocket upgrade response")
+		}
+		if protocol := headers["sec-websocket-protocol"]; protocol != "" && protocol != "binary" {
+			return fmt.Errorf("unexpected WebSocket subprotocol")
+		}
+		if headers["sec-websocket-extensions"] != "" {
+			return fmt.Errorf("unrequested WebSocket extensions")
+		}
+		return nil
+	}
+	return &WsHandshakeError{
 		StatusCode: statusCode,
 		StatusLine: firstLine,
 		Headers:    headers,
 		Location:   headers["location"],
 	}
+}
+
+func hasHeaderToken(value, token string) bool {
+	for _, part := range strings.Split(value, ",") {
+		if strings.EqualFold(strings.TrimSpace(part), token) {
+			return true
+		}
+	}
+	return false
 }
 
 func cfConnectDomain(ctx context.Context, domain, path string, timeout float64) (*RawWebSocket, string, error) {
@@ -1354,12 +1406,10 @@ func (ws *RawWebSocket) Recv() ([]byte, error) {
 }
 
 func (ws *RawWebSocket) Close() {
-	if ws.closed.Swap(true) {
-		return
-	}
-	frame := ws.buildFrame(opClose, nil, true)
-	_ = ws.writeFrame(frame, wsControlTimeout)
-	_ = ws.conn.Close()
+	// Transport cleanup must happen even if Recv or Send already marked it closed.
+	// Close directly so cancellation never waits behind a blocked writer.
+	ws.closed.Store(true)
+	ws.closeOnce.Do(func() { _ = ws.conn.Close() })
 }
 
 var framePool = sync.Pool{
@@ -1661,7 +1711,7 @@ func (s *MsgSplitter) nextPacketLen() int {
 			payloadLen = int(first) * 4
 			headerLen = 1
 		}
-		if payloadLen <= 0 {
+		if payloadLen <= 0 || payloadLen > 16*1024*1024 {
 			return 0
 		}
 		pktLen := headerLen + payloadLen
@@ -1675,7 +1725,7 @@ func (s *MsgSplitter) nextPacketLen() int {
 			return -1
 		}
 		payloadLen := int(binary.LittleEndian.Uint32(s.plainBuf[:4]) & 0x7FFFFFFF)
-		if payloadLen <= 0 {
+		if payloadLen <= 0 || payloadLen > 16*1024*1024 {
 			return 0
 		}
 		pktLen := 4 + payloadLen
@@ -2295,10 +2345,8 @@ func verifyClientHello(data, secret []byte) ([]byte, []byte, bool) {
 
 	mac := hmacSHA256(secret, zeroed)
 
-	for i := 0; i < 28; i++ {
-		if mac[i] != clientRandom[i] {
-			return nil, nil, false
-		}
+	if !hmac.Equal(mac[:28], clientRandom[:28]) {
+		return nil, nil, false
 	}
 
 	tsXor := make([]byte, 4)
@@ -2447,7 +2495,7 @@ func (f *FakeTlsConn) Write(p []byte) (int, error) {
 	return len(p), err
 }
 
-func (f *FakeTlsConn) Close() error                     { return f.conn.Close() }
+func (f *FakeTlsConn) Close() error                       { return f.conn.Close() }
 func (f *FakeTlsConn) LocalAddr() net.Addr                { return f.conn.LocalAddr() }
 func (f *FakeTlsConn) RemoteAddr() net.Addr               { return f.conn.RemoteAddr() }
 func (f *FakeTlsConn) SetDeadline(t time.Time) error      { return f.conn.SetDeadline(t) }
@@ -2472,11 +2520,9 @@ func (c *PrefixConn) Read(p []byte) (int, error) {
 func handleClient(ctx context.Context, conn net.Conn) {
 	stats.connectionsTotal.Add(1)
 	stats.connectionsActive.Add(1)
-	defer func() {
-		if stats.connectionsActive.Load() > 0 {
-			stats.connectionsActive.Add(-1)
-		}
-	}()
+	defer stats.connectionsActive.Add(-1)
+	stopCancel := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stopCancel()
 	peer := conn.RemoteAddr().String()
 	label := peer
 
@@ -2498,7 +2544,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if _, err := io.ReadFull(conn, firstByte); err != nil {
 		return
 	}
-	_ = conn.SetReadDeadline(time.Time{})
+	// Keep the deadline throughout the optional FakeTLS handshake.
 
 	var clientConn net.Conn = conn
 	var handshake []byte
@@ -2770,45 +2816,32 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	}()
 
 	var activeConns sync.WaitGroup
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				select {
-				case <-srvCtx.Done():
-					return
-				default:
-					if ne, ok := err.(net.Error); ok && ne.Timeout() {
-						continue
-					}
-					return
-				}
-			}
-			activeConns.Add(1)
-			go func() {
-				defer activeConns.Done()
-				handleClient(srvCtx, conn)
-			}()
-		}
-	}()
-
-	<-srvCtx.Done()
-	_ = listener.Close()
-
-	done := make(chan struct{})
-	go func() {
+	stopAccept := context.AfterFunc(srvCtx, func() { listener.Close() })
+	defer func() {
+		srvCancel()
+		stopAccept()
+		listener.Close()
+		// Every client has a context cancellation hook that closes its socket,
+		// including clients still waiting for their first handshake bytes.
 		activeConns.Wait()
-		close(done)
+		wsPool.CloseAll()
 	}()
 
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
+	// Accept and Wait never run concurrently with WaitGroup.Add.
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if srvCtx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("accept: %w", err)
+		}
+		activeConns.Add(1)
+		go func() {
+			defer activeConns.Done()
+			handleClient(srvCtx, conn)
+		}()
 	}
-
-	wsPool.CloseAll()
-	return nil
 }
 
 func parseCIDRPool(cidrsStr string) (map[int]string, error) {
@@ -2816,18 +2849,27 @@ func parseCIDRPool(cidrsStr string) (map[int]string, error) {
 	if strings.TrimSpace(cidrsStr) == "" {
 		return result, nil
 	}
-	pairs := strings.Split(cidrsStr, ",")
-	for _, pair := range pairs {
-		parts := strings.Split(pair, ":")
-		if len(parts) == 2 {
-			dcRaw := strings.TrimSpace(parts[0])
-			ipRaw := strings.TrimSpace(parts[1])
-			if dc, err := strconv.Atoi(dcRaw); err == nil && ipRaw != "" {
-				if parsedIP := net.ParseIP(ipRaw); parsedIP != nil {
-					result[dc] = parsedIP.String()
-				}
-			}
+	for _, pair := range strings.Split(cidrsStr, ",") {
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid DC entry %q", pair)
 		}
+		dc, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		absDC := dc
+		if absDC < 0 {
+			absDC = -absDC
+		}
+		if err != nil || dcDefaultIPs[absDC] == "" {
+			return nil, fmt.Errorf("invalid DC identifier %q", parts[0])
+		}
+		ip := net.ParseIP(strings.TrimSpace(parts[1]))
+		if ip == nil {
+			return nil, fmt.Errorf("invalid IP for DC %d", dc)
+		}
+		if _, exists := result[dc]; exists {
+			return nil, fmt.Errorf("duplicate DC %d", dc)
+		}
+		result[dc] = ip.String()
 	}
 	return result, nil
 }
@@ -2849,84 +2891,82 @@ func signalProxyStart(started chan<- error, err error) {
 var (
 	globalCtx    context.Context
 	globalCancel context.CancelFunc
+	globalDone   chan struct{}
 	globalMu     sync.Mutex
 )
 
 //export StartProxy
 func StartProxy(cHost *C.char, port C.int, cDcIps *C.char, cSecret *C.char, verbose C.int) C.int {
+	return C.int(startProxy(C.GoString(cHost), int(port), C.GoString(cDcIps), C.GoString(cSecret), verbose != 0))
+}
+
+func startProxy(host string, port int, dcIps, secret string, verbose bool) int {
 	globalMu.Lock()
 	defer globalMu.Unlock()
-
 	if globalCancel != nil {
 		return -1
 	}
-
-	host := C.GoString(cHost)
-	goPort := int(port)
-	dcIpsStr := C.GoString(cDcIps)
-	secretStr := C.GoString(cSecret)
-	isVerbose := int(verbose) != 0
-
-	initLogging(isVerbose)
-	clearCfproxy429Cooldowns()
-
-	if len(secretStr) == 32 {
-		if _, err := hex.DecodeString(secretStr); err == nil {
-			proxySecretMu.Lock()
-			proxySecret = secretStr
-			proxySecretMu.Unlock()
-		}
+	// Never reuse a previous/default secret when input is malformed.
+	if !validProxySecret(secret) || port < 1 || port > 65535 {
+		return -2
 	}
-
-	initCfproxyDomains()
-
-	dcOptMap, err := parseCIDRPool(dcIpsStr)
+	dcOptMap, err := parseCIDRPool(dcIps)
 	if err != nil {
 		return -2
 	}
 
-	globalCtx, globalCancel = context.WithCancel(context.Background())
+	initLogging(verbose)
+	clearCfproxy429Cooldowns()
+	proxySecretMu.Lock()
+	proxySecret = secret
+	proxySecretMu.Unlock()
+	initCfproxyDomains()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	globalCtx, globalCancel, globalDone = ctx, cancel, done
 	started := make(chan error, 1)
-
 	go func() {
-		_ = runProxy(globalCtx, host, goPort, dcOptMap, started)
+		defer close(done)
+		if err := runProxy(ctx, host, port, dcOptMap, started); err != nil {
+			logError.Printf("Proxy stopped: %s", err)
+		}
 	}()
-
 	if err := <-started; err != nil {
-		globalCancel()
-		globalCancel = nil
-		globalCtx = nil
+		cancel()
+		<-done
+		globalCancel, globalCtx, globalDone = nil, nil, nil
 		return -3
 	}
-
 	return 0
 }
 
+func validProxySecret(secret string) bool {
+	decoded, err := hex.DecodeString(secret)
+	return err == nil && len(decoded) == 16 && secret != strings.Repeat("0", 32)
+}
+
 //export StopProxy
-func StopProxy() C.int {
+func StopProxy() C.int { return C.int(stopProxy()) }
+
+func stopProxy() int {
 	globalMu.Lock()
 	defer globalMu.Unlock()
-
 	if globalCancel == nil {
 		return -1
 	}
-
 	globalCancel()
-	globalCancel = nil
-	globalCtx = nil
-
+	// Do not report a stopped proxy until its listener and client handlers exit.
+	<-globalDone
+	globalCancel, globalCtx, globalDone = nil, nil, nil
 	stats.Reset()
-
 	wsBlackMu.Lock()
 	wsBlacklist = make(map[[2]int]bool)
 	wsBlackMu.Unlock()
-
 	dcFailMu.Lock()
 	dcFailUntil = make(map[[2]int]float64)
 	dcFailMu.Unlock()
-
 	clearCfproxy429Cooldowns()
-
 	return 0
 }
 
@@ -2956,7 +2996,7 @@ func SetCfProxyConfig(enabled C.int, priority C.int, cUserDomain *C.char) {
 
 	cfproxyEnabled = int(enabled) != 0
 
-	userDomain := C.GoString(cUserDomain)
+	userDomain := normalizeCfDomain(C.GoString(cUserDomain))
 	cfproxyUserDomain = userDomain
 
 	if userDomain != "" {
@@ -2968,10 +3008,7 @@ func SetCfProxyConfig(enabled C.int, priority C.int, cUserDomain *C.char) {
 //export SetSecret
 func SetSecret(cSecret *C.char) {
 	s := C.GoString(cSecret)
-	if len(s) != 32 {
-		return
-	}
-	if _, err := hex.DecodeString(s); err != nil {
+	if !validProxySecret(s) {
 		return
 	}
 	proxySecretMu.Lock()
@@ -3022,6 +3059,14 @@ func FreeString(p *C.char) {
 func main() {
 	runtime.LockOSThread()
 	initLogging(true)
+	secret := os.Getenv("UMBRA_PROXY_SECRET")
+	if !validProxySecret(secret) {
+		logError.Println("Set UMBRA_PROXY_SECRET to a nonzero 32-character hexadecimal secret")
+		os.Exit(1)
+	}
+	proxySecretMu.Lock()
+	proxySecret = secret
+	proxySecretMu.Unlock()
 	initCfproxyDomains()
 
 	dcOptMap := map[int]string{

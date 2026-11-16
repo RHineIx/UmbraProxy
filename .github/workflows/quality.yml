@@ -1,0 +1,57 @@
+name: Quality checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Format, vet, and race tests
+        run: |
+          test -z "$(gofmt -l *.go)"
+          go vet ./...
+          go test -race -cover ./...
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager 'ndk;27.2.12479018'
+      - name: Build native libraries
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018" bash scripts/build-native.sh
+      - name: Unit tests, lint, and APK
+        run: bash gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-check-results
+          path: |
+            app/build/reports/
+            app/build/outputs/apk/debug/*.apk

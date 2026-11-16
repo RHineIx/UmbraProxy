@@ -16,6 +16,7 @@ interface ProxyLibrary : Library {
     fun StartProxy(host: String, port: Int, dcIps: String, secret: String, verbose: Int): Int
     fun StopProxy(): Int
     fun SetPoolSize(size: Int)
+    fun SetCfProxyCacheDir(cacheDir: String)
     fun SetCfProxyConfig(enabled: Int, priority: Int, userDomain: String)
     fun SetFakeTls(enabled: Int, domain: String)
     fun SetSecret(secret: String)
@@ -33,40 +34,45 @@ object NativeProxy {
         }
     }
 
-    fun startProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String, dcIps: String): Boolean {
+    @Synchronized
+    fun startProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String, dcIps: String, poolSize: Int = 4, cacheDir: String = "", shouldStart: () -> Boolean = { true }): Boolean {
+        // Check inside the lifecycle lock: destruction may precede a queued IO call.
+        if (!shouldStart()) return false
         return try {
+            ProxyLibrary.INSTANCE.SetPoolSize(poolSize)
+            ProxyLibrary.INSTANCE.SetCfProxyCacheDir(cacheDir)
             ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, cfDomain)
             ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
             val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, dcIps, secret, 0)
             result == 0
         } catch (e: Throwable) {
+            android.util.Log.e("UmbraProxy", "Native proxy startup failed", e)
             false
         }
     }
 
+    @Synchronized
+    fun restartProxy(port: Int, cfEnabled: Boolean, cfDomain: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String, secret: String, dcIps: String, poolSize: Int, cacheDir: String, shouldStart: () -> Boolean): Boolean {
+        stopProxy()
+        return startProxy(port, cfEnabled, cfDomain, fakeTlsEnabled, fakeTlsDomain, secret, dcIps, poolSize, cacheDir, shouldStart)
+    }
+
+    @Synchronized
     fun stopProxy() {
         runCatching { ProxyLibrary.INSTANCE.StopProxy() }
     }
 
-    fun getStats(): String? {
-        val ptr = ProxyLibrary.INSTANCE.GetStats() ?: return null
-        return try {
-            ptr.getString(0)
-        } catch (e: Throwable) {
-            null
-        } finally {
-            ProxyLibrary.INSTANCE.FreeString(ptr)
-        }
-    }
+    fun getStats(): String? = readNativeString { it.GetStats() }
 
-    fun getSecretWithPrefix(): String? {
-        val ptr = ProxyLibrary.INSTANCE.GetSecretWithPrefix() ?: return null
-        return try {
-            ptr.getString(0)
-        } catch (e: Throwable) {
-            null
+    fun getSecretWithPrefix(): String? = readNativeString { it.GetSecretWithPrefix() }
+
+    private fun readNativeString(read: (ProxyLibrary) -> Pointer?): String? = runCatching {
+        val library = ProxyLibrary.INSTANCE
+        val pointer = read(library) ?: return@runCatching null
+        try {
+            pointer.getString(0, "UTF-8")
         } finally {
-            ProxyLibrary.INSTANCE.FreeString(ptr)
+            library.FreeString(pointer)
         }
-    }
+    }.getOrNull()
 }

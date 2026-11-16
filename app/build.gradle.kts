@@ -25,7 +25,7 @@ android {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
         }
 
-        resourceConfigurations.addAll(listOf("en", "ar"))
+        androidResources.localeFilters.addAll(listOf("en", "ar"))
     }
 
     splits {
@@ -105,7 +105,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            jniLibs.setSrcDirs(listOf("src/main/jniLibs"))
+            jniLibs.directories.add("src/main/jniLibs")
         }
     }
 }
@@ -126,8 +126,26 @@ dependencies {
     implementation("androidx.compose.material3:material3")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
     
+    testImplementation("junit:junit:4.13.2")
+
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     implementation("androidx.compose.material:material-icons-extended")
+}
+
+// Packaging without the Go libraries produces an APK whose proxy cannot start.
+val verifyNativeLibraries by tasks.registering {
+    doLast {
+        listOf("arm64-v8a", "armeabi-v7a").forEach { abi ->
+            check(file("src/main/jniLibs/$abi/libumbraproxy.so").isFile) {
+                "Missing native library for $abi. Run: bash scripts/build-native.sh"
+            }
+        }
+    }
+}
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("NativeLibs")) {
+        dependsOn(verifyNativeLibraries)
+    }
 }

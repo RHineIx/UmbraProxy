@@ -68,7 +68,7 @@ class ProxyTileService : TileService() {
         // Update labels based on state
         tile.label = "UmbraProxy"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            tile.subtitle = if (active) "Active" else "Off"
+            tile.subtitle = getString(if (active) R.string.tile_active else R.string.tile_off)
         }
         
         tile.updateTile()

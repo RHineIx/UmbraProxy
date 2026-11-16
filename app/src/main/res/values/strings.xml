@@ -2,7 +2,7 @@
     <string name="app_name">UmbraProxy</string>
 
     <string name="status_connecting">Connecting...</string>
-    <string name="status_connected">Connected &amp; Secured</string>
+    <string name="status_connected">Proxy running</string>
     <string name="status_standby">System Standby</string>
     <string name="service_starting">Starting UmbraProxy...</string>
     <string name="service_stopping">Shutting down...</string>
@@ -39,5 +39,15 @@
     <string name="btn_add">Add</string>
     <string name="btn_later">Later</string>
 
+    <string name="msg_invalid_domain">Enter a valid domain name without a scheme, port, or path.</string>
+    <string name="msg_invalid_port">Invalid port: %1$s</string>
     <string name="action_disconnect">Disconnect</string>
+    <string name="theme_title">Theme</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_dynamic">Dynamic colors</string>
+    <string name="tile_active">Active</string>
+    <string name="tile_off">Off</string>
+    <string name="label_autostart">Start after device reboot</string>
 </resources>
