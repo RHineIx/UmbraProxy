@@ -1,53 +1,175 @@
-name: UmbraProxy release candidate
+name: UmbraProxy Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag, for example v1.4.2'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: umbra-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  BUILD_TOOLS_VERSION: '36.0.0'
+
 jobs:
-  build:
+  release:
+    if: ${{ github.event_name != 'push' || (github.event.created && !github.event.deleted) }}
+    name: Build and publish signed APKs
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read release version
+        id: version
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || {
+            echo 'Use a vMAJOR.MINOR.PATCH tag with an optional prerelease suffix.' >&2
+            exit 1
+          }
+          TAG_COMMIT="$(git rev-parse --verify "refs/tags/${TAG_NAME}^{commit}")"
+          [[ "$TAG_COMMIT" == "$(git rev-parse HEAD)" ]] || exit 1
+          TAG_COUNT="$(git tag --list 'v*' | wc -l | tr -d '[:space:]')"
+          [[ "$TAG_COUNT" =~ ^[1-9][0-9]*$ ]] || exit 1
+          {
+            echo "name=${TAG_NAME#v}"
+            # The previous application versionCode was 5.
+            echo "code=$((5 + TAG_COUNT))"
+            echo "tag=$TAG_NAME"
+            echo "commit=$TAG_COMMIT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for variable in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!variable}" ]] || {
+              echo "Missing required repository secret: $variable" >&2
+              exit 1
+            }
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/umbra-signing.jks"
+          test -s "$RUNNER_TEMP/umbra-signing.jks"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
-      - name: Install NDK
-        run: sdkmanager 'ndk;27.2.12479018'
-      - name: Build native libraries
-        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018" bash scripts/build-native.sh
-      - name: Test and build unsigned candidate
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install SDK and NDK
+        run: sdkmanager 'platforms;android-35' "build-tools;$BUILD_TOOLS_VERSION" 'ndk;27.2.12479018'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Check Go and build native libraries
         run: |
           go vet ./...
           go test -race ./...
-          bash gradlew testDebugUnitTest lintDebug assembleRelease --stacktrace
-      - name: Read application version
-        id: version
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018" bash scripts/build-native.sh
+      - name: Build release, test, and lint
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
-          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
-          test -n "$VERSION"
-          echo "tag=v${VERSION}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-release-candidate
-          path: app/build/outputs/apk/release/*.apk
-      - name: Prepare draft release for signing and review
+          bash gradlew testDebugUnitTest lintRelease assembleRelease --no-daemon --stacktrace \
+            -PAPP_VERSION_NAME="$VERSION_NAME" -PAPP_VERSION_CODE="$VERSION_CODE"
+
+      - name: Sign and verify APKs
+        id: apk
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          RELEASE_DIR="$RUNNER_TEMP/umbra-release"
+          mkdir -p "$RELEASE_DIR"
+          for abi in arm64-v8a armeabi-v7a universal; do
+            INPUT_APK="app/build/outputs/apk/release/app-${abi}-release-unsigned.apk"
+            SIGNED_APK="$RELEASE_DIR/UmbraProxy-${TAG_NAME}-${abi}.apk"
+            test -s "$INPUT_APK"
+            "$BUILD_TOOLS/zipalign" -c -P 16 4 "$INPUT_APK"
+            "$BUILD_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/umbra-signing.jks" \
+              --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --ks-key-alias "$KEY_ALIAS" \
+              --v4-signing-enabled false --out "$SIGNED_APK" "$INPUT_APK"
+            "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED_APK"
+            "$BUILD_TOOLS/zipalign" -c -P 16 4 "$SIGNED_APK"
+            BADGING="$("$BUILD_TOOLS/aapt" dump badging "$SIGNED_APK")"
+            grep -Fq "name='io.github.umbraproxy' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'" <<< "$BADGING"
+            unzip -Z1 "$SIGNED_APK" > "$RUNNER_TEMP/umbra-apk-entries.txt"
+            if [[ "$abi" == universal ]]; then
+              expected_abis=(arm64-v8a armeabi-v7a)
+            else
+              expected_abis=("$abi")
+            fi
+            for expected in "${expected_abis[@]}"; do
+              grep -Fxq "lib/$expected/libumbraproxy.so" "$RUNNER_TEMP/umbra-apk-entries.txt"
+            done
+            while IFS= read -r entry; do
+              if [[ "$entry" == lib/*.so ]]; then
+                library_abi="${entry#lib/}"
+                library_abi="${library_abi%%/*}"
+                [[ " ${expected_abis[*]} " == *" $library_abi "* ]] || {
+                  echo "Unexpected native ABI: $entry" >&2
+                  exit 1
+                }
+              fi
+            done < "$RUNNER_TEMP/umbra-apk-entries.txt"
+          done
+          (cd "$RELEASE_DIR" && sha256sum ./*.apk > SHA256SUMS.txt)
+          echo "directory=$RELEASE_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Publish signed release
         uses: softprops/action-gh-release@v2
         with:
-          target_commitish: ${{ github.sha }}
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Unsigned candidate ${{ steps.version.outputs.tag }}
-          draft: true
-          body: These APKs are unsigned build candidates. Sign them with the existing application key and verify on a device before publishing.
-          files: app/build/outputs/apk/release/*.apk
+          target_commitish: ${{ steps.version.outputs.commit }}
+          name: UmbraProxy ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.apk.outputs.directory }}/*.apk
+            ${{ steps.apk.outputs.directory }}/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Clean signing key
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/umbra-signing.jks"
