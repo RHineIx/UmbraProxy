@@ -58,7 +58,8 @@
     <string name="logs_exported">Logs saved</string>
     <string name="logs_action_failed">Log operation failed; see the error entry</string>
     <string name="logs_clipboard_too_large">Too many logs for the clipboard. Export them to a file.</string>
-    <string name="logs_search">Search message, source, or exception</string>
+    <string name="logs_search">Search logs</string>
+    <string name="logs_search_hint">Message, source, or exception</string>
     <string name="logs_clear_search">Clear search</string>
     <string name="logs_pause">Pause display</string>
     <string name="logs_resume">Resume display</string>

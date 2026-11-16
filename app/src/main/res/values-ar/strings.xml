@@ -53,7 +53,8 @@
     <string name="logs_exported">حُفظت السجلات</string>
     <string name="logs_action_failed">تعذرت العملية؛ راجع سجل الخطأ</string>
     <string name="logs_clipboard_too_large">السجلات كبيرة للحافظة؛ صدّرها إلى ملف.</string>
-    <string name="logs_search">ابحث في الرسالة أو المصدر أو الاستثناء</string>
+    <string name="logs_search">البحث في السجلات</string>
+    <string name="logs_search_hint">الرسالة أو المصدر أو الاستثناء</string>
     <string name="logs_clear_search">مسح البحث</string>
     <string name="logs_pause">تجميد العرض</string>
     <string name="logs_resume">استئناف العرض</string>
