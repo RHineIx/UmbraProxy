@@ -24,7 +24,7 @@
     <string name="btn_generate">توليد</string>
     <string name="btn_launch_telegram">فتح تيليجرام</string>
     <string name="tooltip_view_logs">عرض السجلات</string>
-    <string name="title_system_logs">سجلات النظام</string>
+    <string name="title_system_logs">سجلات البروكسي</string>
     <string name="btn_clear_logs">مسح السجلات</string>
     <string name="msg_logs_copied">نُسخت السجلات</string>
     <string name="msg_copied_clipboard">نُسخ إلى الحافظة</string>
@@ -44,4 +44,32 @@
     <string name="tile_active">نشط</string>
     <string name="tile_off">متوقف</string>
     <string name="label_autostart">التشغيل بعد إعادة تشغيل الجهاز</string>
+
+    <string name="logs_back">رجوع</string>
+    <string name="logs_copy">نسخ السجلات المعروضة</string>
+    <string name="logs_export">تصدير السجلات المعروضة</string>
+    <string name="logs_export_text">تصدير بصيغة .log</string>
+    <string name="logs_export_json">تصدير بصيغة .jsonl</string>
+    <string name="logs_exported">حُفظت السجلات</string>
+    <string name="logs_action_failed">تعذرت العملية؛ راجع سجل الخطأ</string>
+    <string name="logs_clipboard_too_large">السجلات كبيرة للحافظة؛ صدّرها إلى ملف.</string>
+    <string name="logs_search">ابحث في الرسالة أو المصدر أو الاستثناء</string>
+    <string name="logs_clear_search">مسح البحث</string>
+    <string name="logs_pause">تجميد العرض</string>
+    <string name="logs_resume">استئناف العرض</string>
+    <string name="logs_follow">تتبّع الأحدث</string>
+    <string name="logs_following">تتبّع الأحدث مفعّل</string>
+    <string name="logs_frozen">العرض مجمّد</string>
+    <string name="logs_live">مباشر</string>
+    <string name="logs_capture_debug">تسجيل تفاصيل DEBUG</string>
+    <string name="logs_clock_hint">التوقيت المحلي · التصدير بتوقيت UTC</string>
+    <string name="logs_capture_error">تعذر قراءة سجلات النواة؛ راجع خطأ Logger أدناه.</string>
+    <string name="logs_count">المعروض %1$d · المحفوظ %2$d</string>
+    <string name="logs_retention">الأقدم المحذوفة: %1$d · المفقودة من النواة: %2$d</string>
+    <string name="logs_empty">لم تُسجّل أحداث بعد</string>
+    <string name="logs_no_matches">لا توجد أحداث مطابقة</string>
+    <string name="logs_memory_hint">آخر ١٠٠٠ حدث في الذاكرة؛ صدّرها للاحتفاظ بها.</string>
+    <string name="logs_truncated">تجاوزت الرسالة أو الاستثناء حد التسجيل</string>
+    <string name="logs_show_detail">عرض تفاصيل الاستثناء</string>
+    <string name="logs_hide_detail">إخفاء تفاصيل الاستثناء</string>
 </resources>

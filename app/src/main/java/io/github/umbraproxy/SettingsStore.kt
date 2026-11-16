@@ -45,6 +45,7 @@ class SettingsStore(private val context: Context) {
         val SECRET_KEY = stringPreferencesKey("secret_key")
         val LOG_SHOW_DEBUG = booleanPreferencesKey("log_show_debug")
         val LOG_SHOW_INFO = booleanPreferencesKey("log_show_info")
+        val LOG_SHOW_WARN = booleanPreferencesKey("log_show_warn")
         val LOG_SHOW_ERROR = booleanPreferencesKey("log_show_error")
         val LOG_SHOW_NULL = booleanPreferencesKey("log_show_null")
         val IS_EXPERIMENTAL_MODE = booleanPreferencesKey("is_experimental_mode")
@@ -85,6 +86,7 @@ class SettingsStore(private val context: Context) {
 
     val logShowDebug: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_DEBUG] ?: DEFAULT_LOG_SHOW_DEBUG }
     val logShowInfo: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_INFO] ?: DEFAULT_LOG_SHOW_INFO }
+    val logShowWarn: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_WARN] ?: true }
     val logShowError: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_ERROR] ?: DEFAULT_LOG_SHOW_ERROR }
     val logShowNull: Flow<Boolean> = context.dataStore.data.map { it[Keys.LOG_SHOW_NULL] ?: DEFAULT_LOG_SHOW_NULL }
 
@@ -134,6 +136,16 @@ class SettingsStore(private val context: Context) {
             it[Keys.LOG_SHOW_ERROR] = error
             it[Keys.LOG_SHOW_NULL] = isNull
         }
+    }
+
+    suspend fun saveLogLevelEnabled(level: LogLevel, enabled: Boolean) {
+        val key = when (level) {
+            LogLevel.DEBUG -> Keys.LOG_SHOW_DEBUG
+            LogLevel.INFO -> Keys.LOG_SHOW_INFO
+            LogLevel.WARN -> Keys.LOG_SHOW_WARN
+            LogLevel.ERROR -> Keys.LOG_SHOW_ERROR
+        }
+        context.dataStore.edit { it[key] = enabled }
     }
 
     suspend fun saveAutoStartOnBoot(enabled: Boolean) {

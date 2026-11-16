@@ -8,10 +8,9 @@ package main
 #include <android/log.h>
 #endif
 
-static void androidLogProxy(char *msg) {
+static void androidLogProxy(char *msg, int priority) {
 #ifdef __ANDROID__
-    // Updated Log Tag to UmbraProxy for the Android LogManager to intercept correctly
-    __android_log_print(ANDROID_LOG_INFO, "UmbraProxy", "%s", msg);
+    __android_log_print(priority, "UmbraProxy/Core", "%s", msg);
 #endif
 }
 */
@@ -200,18 +199,22 @@ func resolveFallbackTarget(dc int, isMedia bool) string {
 // ---------------------------------------------------------------------------
 
 var (
-	logInfo  = log.New(androidLogWriter{}, "", 0)
-	logWarn  = log.New(androidLogWriter{}, "[WARN] ", 0)
-	logError = log.New(androidLogWriter{}, "[ERROR] ", 0)
-	logDebug = log.New(debugLogWriter{}, "[DEBUG] ", 0)
+	logInfo  = log.New(nativeLogWriter{level: "INFO", priority: 4}, "", 0)
+	logWarn  = log.New(nativeLogWriter{level: "WARN", priority: 5}, "", 0)
+	logError = log.New(nativeLogWriter{level: "ERROR", priority: 6}, "", 0)
+	logDebug = log.New(debugLogWriter{}, "", 0)
 )
 
-type androidLogWriter struct{}
+type nativeLogWriter struct {
+	level    string
+	priority int
+}
 
-func (w androidLogWriter) Write(p []byte) (n int, err error) {
-	_, _ = os.Stderr.Write(p)
-	cs := C.CString(string(p))
-	C.androidLogProxy(cs)
+func (w nativeLogWriter) Write(p []byte) (n int, err error) {
+	message := recordCoreLog(w.level, string(p))
+	_, _ = fmt.Fprintf(os.Stderr, "[%s] %s\n", w.level, message)
+	cs := C.CString(message)
+	C.androidLogProxy(cs, C.int(w.priority))
 	C.free(unsafe.Pointer(cs))
 	return len(p), nil
 }
@@ -220,7 +223,7 @@ type debugLogWriter struct{}
 
 func (debugLogWriter) Write(p []byte) (int, error) {
 	if logVerbose.Load() {
-		return (androidLogWriter{}).Write(p)
+		return (nativeLogWriter{level: "DEBUG", priority: 3}).Write(p)
 	}
 	return len(p), nil
 }
@@ -2518,13 +2521,15 @@ func (c *PrefixConn) Read(p []byte) (int, error) {
 }
 
 func handleClient(ctx context.Context, conn net.Conn) {
-	stats.connectionsTotal.Add(1)
+	clientID := stats.connectionsTotal.Add(1)
 	stats.connectionsActive.Add(1)
 	defer stats.connectionsActive.Add(-1)
 	stopCancel := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stopCancel()
 	peer := conn.RemoteAddr().String()
 	label := peer
+	logDebug.Printf("Client %d accepted from %s", clientID, peer)
+	defer logDebug.Printf("Client %d closed", clientID)
 
 	setSockOpts(conn)
 
@@ -2585,6 +2590,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	handshake = make([]byte, 64)
 	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.ReadFull(clientConn, handshake); err != nil {
+		logDebug.Printf("Client %d MTProto handshake ended: %s", clientID, compactConnError(err))
 		return
 	}
 	_ = clientConn.SetReadDeadline(time.Time{})
@@ -2609,6 +2615,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	proto := binary.LittleEndian.Uint32(protoTag)
 	if !validProtos[proto] {
 		stats.connectionsBad.Add(1)
+		logWarn.Printf("Client %d rejected: invalid MTProto authentication or transport", clientID)
 		return
 	}
 
@@ -2798,9 +2805,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 
 	startCfproxyRefresh(srvCtx)
 
-	logInfo.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	logInfo.Println("  UmbraProxy Started")
-	logInfo.Printf("  Address: %s:%d", host, port)
+	logInfo.Printf("Listener ready on %s", addr)
 
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -2967,8 +2972,18 @@ func stopProxy() int {
 	dcFailUntil = make(map[[2]int]float64)
 	dcFailMu.Unlock()
 	clearCfproxy429Cooldowns()
+	logInfo.Println("Proxy stopped; listener and clients closed")
 	return 0
 }
+
+//export DrainLogs
+func DrainLogs() *C.char { return C.CString(string(encodeCoreLogs())) }
+
+//export ClearLogs
+func ClearLogs() { coreLogs.clear() }
+
+//export SetVerboseLogging
+func SetVerboseLogging(enabled C.int) { logVerbose.Store(enabled != 0) }
 
 //export SetPoolSize
 func SetPoolSize(size C.int) {

@@ -6,7 +6,6 @@ import android.widget.Toast
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import android.util.Log
 
 object ProxyController {
 
@@ -16,10 +15,10 @@ object ProxyController {
             context.startForegroundService(intent)
             true
         } catch (e: IllegalStateException) {
-            Log.e("UmbraProxy", "Android refused to start the foreground service", e)
+            AppLog.e("Controller", "Android refused to start the foreground service", e)
             false
         } catch (e: SecurityException) {
-            Log.e("UmbraProxy", "Missing permission to start the foreground service", e)
+            AppLog.e("Controller", "Missing permission to start the foreground service", e)
             false
         }
     }

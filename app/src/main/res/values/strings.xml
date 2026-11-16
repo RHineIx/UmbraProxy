@@ -28,7 +28,7 @@
     <string name="btn_launch_telegram">Launch Telegram</string>
 
     <string name="tooltip_view_logs">View Logs</string>
-    <string name="title_system_logs">System Logs</string>
+    <string name="title_system_logs">Proxy logs</string>
     <string name="btn_clear_logs">Clear Logs</string>
     <string name="msg_logs_copied">Logs copied</string>
     <string name="msg_copied_clipboard">Copied to clipboard</string>
@@ -50,4 +50,31 @@
     <string name="tile_active">Active</string>
     <string name="tile_off">Off</string>
     <string name="label_autostart">Start after device reboot</string>
+    <string name="logs_back">Back</string>
+    <string name="logs_copy">Copy filtered logs</string>
+    <string name="logs_export">Export filtered logs</string>
+    <string name="logs_export_text">Export .log</string>
+    <string name="logs_export_json">Export .jsonl</string>
+    <string name="logs_exported">Logs saved</string>
+    <string name="logs_action_failed">Log operation failed; see the error entry</string>
+    <string name="logs_clipboard_too_large">Too many logs for the clipboard. Export them to a file.</string>
+    <string name="logs_search">Search message, source, or exception</string>
+    <string name="logs_clear_search">Clear search</string>
+    <string name="logs_pause">Pause display</string>
+    <string name="logs_resume">Resume display</string>
+    <string name="logs_follow">Follow latest</string>
+    <string name="logs_following">Following latest</string>
+    <string name="logs_frozen">FROZEN</string>
+    <string name="logs_live">LIVE</string>
+    <string name="logs_capture_debug">Capture DEBUG details</string>
+    <string name="logs_clock_hint">Local time · exports use UTC</string>
+    <string name="logs_capture_error">Core log capture unavailable. See the Logger error below.</string>
+    <string name="logs_count">Shown: %1$d · Retained: %2$d</string>
+    <string name="logs_retention">Older removed: %1$d · Core overwritten: %2$d</string>
+    <string name="logs_empty">No recorded events yet</string>
+    <string name="logs_no_matches">No matching events</string>
+    <string name="logs_memory_hint">Last 1,000 events in memory. Export to keep them.</string>
+    <string name="logs_truncated">Message or exception exceeded the capture limit</string>
+    <string name="logs_show_detail">Show exception trace</string>
+    <string name="logs_hide_detail">Hide exception trace</string>
 </resources>

@@ -3,7 +3,6 @@ package io.github.umbraproxy
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +23,7 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val settingsStore = SettingsStore(appContext)
                 if (!settingsStore.autoStartOnBoot.first()) {
-                    Log.i("UmbraBoot", "Boot completed, autostart disabled")
+                    AppLog.i("Boot", "Boot completed, autostart disabled")
                     return@launch
                 }
 
@@ -32,9 +31,9 @@ class BootReceiver : BroadcastReceiver() {
                     context = appContext,
                     showInvalidPortToast = false
                 )
-                Log.i("UmbraBoot", "Boot completed, proxy autostart requested: $started")
+                AppLog.i("Boot", "Boot completed, proxy autostart requested: $started")
             } catch (e: Exception) {
-                Log.w("UmbraBoot", "Failed to autostart proxy after boot", e)
+                AppLog.w("Boot", "Failed to autostart proxy after boot", e)
             } finally {
                 pendingResult.finish()
             }

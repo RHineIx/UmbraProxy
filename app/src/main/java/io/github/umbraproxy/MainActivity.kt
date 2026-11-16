@@ -17,7 +17,6 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,10 +35,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,9 +42,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Terminal
@@ -66,24 +59,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.umbraproxy.ui.LogsScreen
 import io.github.umbraproxy.ui.FloatingToolbar
 import io.github.umbraproxy.ui.UmbraProxyTheme
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -180,7 +170,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
         settingsStore.incrementLaunchCount()
     }
 
-    // 🚀 FIXED: LogManager is now strictly tied to UI foreground visibility to save battery.
+    // The UI and foreground service own independent native-log capture leases.
     DisposableEffect(lifecycleOwner, isReady) {
         val observer = LifecycleEventObserver { _, event ->
             if (isReady) {
@@ -491,97 +481,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { context.startActivity(intent) } catch (e: Exception) {}
                 }.padding(vertical = 18.dp, horizontal = 8.dp))
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun LogsScreen(settingsStore: SettingsStore, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val logs by LogManager.logs.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
-
-    val showInfo by settingsStore.logShowInfo.collectAsStateWithLifecycle(initialValue = true)
-    val showError by settingsStore.logShowError.collectAsStateWithLifecycle(initialValue = true)
-    val showDebug by settingsStore.logShowDebug.collectAsStateWithLifecycle(initialValue = true)
-    val showNull by settingsStore.logShowNull.collectAsStateWithLifecycle(initialValue = true)
-
-    val filteredLogs by remember {
-        derivedStateOf {
-            logs.filter { log ->
-                when (log.level) {
-                    LogLevel.INFO, LogLevel.WARN -> showInfo
-                    LogLevel.ERROR -> showError
-                    LogLevel.DEBUG -> showDebug
-                    LogLevel.UNKNOWN -> showNull
-                }
-            }
-        }
-    }
-
-    BackHandler { onBack() }
-
-    LaunchedEffect(filteredLogs.size) {
-        if (filteredLogs.isNotEmpty()) {
-            listState.animateScrollToItem(filteredLogs.size - 1)
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.title_system_logs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.White)
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = {
-                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val text = filteredLogs.joinToString("\n") { if (it.count > 1) "${it.message} (x${it.count})" else it.message }
-                            cb.setPrimaryClip(ClipData.newPlainText("Logs", text))
-                            Toast.makeText(context, context.getString(R.string.msg_logs_copied), Toast.LENGTH_SHORT).show()
-                        }) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White)
-                        }
-                        IconButton(onClick = { LogManager.clearLogs() }) {
-                            Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E1E1E))
-                )
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item { FilterChip(selected = showInfo, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, !showInfo, showError, showNull) } }, label = { Text("INFO") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary)) }
-                    item { FilterChip(selected = showError, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, !showError, showNull) } }, label = { Text("ERROR") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.error, selectedLabelColor = MaterialTheme.colorScheme.onError)) }
-                    item { FilterChip(selected = showDebug, onClick = { scope.launch { settingsStore.saveLogFilters(!showDebug, showInfo, showError, showNull) } }, label = { Text("DEBUG") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF455A64), selectedLabelColor = Color.White)) }
-                    item { FilterChip(selected = showNull, onClick = { scope.launch { settingsStore.saveLogFilters(showDebug, showInfo, showError, !showNull) } }, label = { Text("NULL") }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF616161), selectedLabelColor = Color.White)) }
-                }
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(filteredLogs) { log ->
-                    val color = when (log.level) {
-                        LogLevel.ERROR -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.primary
-                    }
-                    val textOutput = if (log.count > 1) "${log.message} (x${log.count})" else log.message
-                    Text(text = textOutput, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth())
-                }
-            }
         }
     }
 }
