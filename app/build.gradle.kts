@@ -129,6 +129,7 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
 
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     implementation("androidx.compose.material:material-icons-extended")

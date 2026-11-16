@@ -30,8 +30,8 @@
 # JNA callback & structure support
 -keep class * implements com.sun.jna.Callback { *; }
 -keep class * extends com.sun.jna.Structure { *; }
--renamesourcefileattribute ""
--keepattributes !LineNumberTable,*
+# Preserve file/line metadata so exported exception traces remain actionable.
+-keepattributes *
 
 
 # ─── Our proxy library interface and NativeProxy object ───

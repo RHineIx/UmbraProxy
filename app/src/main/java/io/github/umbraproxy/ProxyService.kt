@@ -13,7 +13,6 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,6 +77,8 @@ class ProxyService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        LogManager.startLogging("service")
+        AppLog.i("Service", "Foreground service created")
         createNotificationChannel()
         setupNetworkMonitor()
     }
@@ -107,9 +108,9 @@ class ProxyService : Service() {
                 }
             }
             connectivityManager?.registerDefaultNetworkCallback(networkCallback!!)
-            Log.i("UmbraProxy", "Network monitor registered successfully")
+            AppLog.i("Service", "Network monitor registered successfully")
         } catch (e: Exception) {
-            Log.e("UmbraProxy", "Failed to setup network monitor", e)
+            AppLog.e("Service", "Failed to setup network monitor", e)
         }
     }
 
@@ -123,7 +124,7 @@ class ProxyService : Service() {
             reconnectMutex.withLock {
                 if (stopping || !_isRunning.value) return@withLock
 
-                Log.i("UmbraProxy", "Triggering soft restart due to: $reason")
+                AppLog.i("Service", "Triggering soft restart due to: $reason")
                 _isStarting.value = true
                 updateNotification(getString(R.string.status_connecting))
 
@@ -138,10 +139,10 @@ class ProxyService : Service() {
                     withContext(Dispatchers.Main) {
                         if (success && !stopping) {
                             _isStarting.value = false
-                            Log.i("UmbraProxy", "Soft restart completed successfully")
+                            AppLog.i("Service", "Soft restart completed successfully")
                             startWatchdogAndStats(lastPort)
                         } else if (!success) {
-                            Log.e("UmbraProxy", "Soft restart failed, initiating full shutdown")
+                            AppLog.e("Service", "Soft restart failed, initiating full shutdown")
                             stopProxyInternal()
                         }
                     }
@@ -159,7 +160,7 @@ class ProxyService : Service() {
         if (stopping) return START_NOT_STICKY
 
         if (_isRunning.value || _isStarting.value) {
-            Log.i("UmbraProxy", "Service already running or starting, ignoring duplicate intent.")
+            AppLog.i("Service", "Service already running or starting, ignoring duplicate intent.")
             return START_STICKY
         }
 
@@ -202,7 +203,7 @@ class ProxyService : Service() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e("UmbraProxy", "Unable to restore proxy settings", e)
+                AppLog.e("Service", "Unable to restore proxy settings", e)
                 stopProxyInternal()
             }
         }
@@ -262,7 +263,7 @@ class ProxyService : Service() {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, createNotification(content))
-        } catch (e: Exception) { Log.w("UmbraProxy", "Failed to notify", e) }
+        } catch (e: Exception) { AppLog.w("Service", "Failed to notify", e) }
     }
 
     private fun createNotification(content: String): Notification {
@@ -318,8 +319,10 @@ class ProxyService : Service() {
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
         } catch (e: Exception) {
-            Log.w("UmbraProxy", "Failed to unregister network callback", e)
+            AppLog.w("Service", "Failed to unregister network callback", e)
         }
+        AppLog.i("Service", "Foreground service destroyed")
+        LogManager.stopLogging("service")
         super.onDestroy()
     }
 
@@ -328,7 +331,7 @@ class ProxyService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         if (_isRunning.value) {
-            Log.i("UmbraProxy", "App swiped from recents, service kept alive")
+            AppLog.i("Service", "App swiped from recents, service kept alive")
         }
     }
 
@@ -346,7 +349,7 @@ class ProxyService : Service() {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "UmbraProxy::WakeLock").apply {
                 acquire(WAKELOCK_TIMEOUT_MS)
             }
-        } catch (e: Exception) { Log.w("UmbraProxy", "WakeLock fail", e) }
+        } catch (e: Exception) { AppLog.w("Service", "WakeLock fail", e) }
     }
 
     private fun refreshWakeLock() {
@@ -356,7 +359,7 @@ class ProxyService : Service() {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "UmbraProxy::WakeLock").apply {
                 acquire(WAKELOCK_TIMEOUT_MS)
             }
-        } catch (e: Exception) { Log.w("UmbraProxy", "WakeLock refresh fail", e) }
+        } catch (e: Exception) { AppLog.w("Service", "WakeLock refresh fail", e) }
     }
 
     private fun releaseWakeLock() {

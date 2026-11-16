@@ -23,9 +23,13 @@ interface ProxyLibrary : Library {
     fun GetSecretWithPrefix(): Pointer?
     fun GetStats(): Pointer?
     fun FreeString(p: Pointer)
+    fun DrainLogs(): Pointer?
+    fun ClearLogs()
+    fun SetVerboseLogging(enabled: Int)
 }
 
 object NativeProxy {
+    private var verboseLogging = false
 
     fun updateConfigForSecret(secret: String, fakeTlsEnabled: Boolean, fakeTlsDomain: String) {
         runCatching {
@@ -43,10 +47,11 @@ object NativeProxy {
             ProxyLibrary.INSTANCE.SetCfProxyCacheDir(cacheDir)
             ProxyLibrary.INSTANCE.SetCfProxyConfig(if (cfEnabled) 1 else 0, 1, cfDomain)
             ProxyLibrary.INSTANCE.SetFakeTls(if (fakeTlsEnabled) 1 else 0, fakeTlsDomain)
-            val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, dcIps, secret, 0)
+            val result = ProxyLibrary.INSTANCE.StartProxy("127.0.0.1", port, dcIps, secret, if (verboseLogging) 1 else 0)
+            if (result != 0) AppLog.e("Native", "Proxy startup rejected (code=$result)")
             result == 0
         } catch (e: Throwable) {
-            android.util.Log.e("UmbraProxy", "Native proxy startup failed", e)
+            AppLog.e("Native", "Native proxy startup failed", e)
             false
         }
     }
@@ -60,6 +65,21 @@ object NativeProxy {
     @Synchronized
     fun stopProxy() {
         runCatching { ProxyLibrary.INSTANCE.StopProxy() }
+            .onFailure { AppLog.e("Native", "Native proxy shutdown failed", it) }
+    }
+
+    fun drainLogs(): Result<String> = runCatching {
+        val library = ProxyLibrary.INSTANCE
+        val pointer = library.DrainLogs() ?: error("Native log stream returned a null pointer")
+        try { pointer.getString(0, "UTF-8") } finally { library.FreeString(pointer) }
+    }
+
+    fun clearLogs(): Result<Unit> = runCatching { ProxyLibrary.INSTANCE.ClearLogs() }
+
+    @Synchronized
+    fun setVerboseLogging(enabled: Boolean): Result<Unit> = runCatching {
+        ProxyLibrary.INSTANCE.SetVerboseLogging(if (enabled) 1 else 0)
+        verboseLogging = enabled
     }
 
     fun getStats(): String? = readNativeString { it.GetStats() }

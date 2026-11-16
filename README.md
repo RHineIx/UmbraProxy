@@ -11,7 +11,7 @@ same device. This is a Telegram proxy, not a device-wide VPN.
 - Telegram WebSocket transport with optional third-party Cloudflare routing and TCP fallback.
 - Optional FakeTLS transport camouflage and generated 128-bit proxy secrets.
 - Foreground service, default-network change detection, Quick Settings tile, and optional boot startup.
-- English/Arabic resources, light/dark/system themes, live counters, and bounded UI logs.
+- English/Arabic resources, light/dark/system themes, live counters, and a structured log console with search, level filters and file export.
 
 “Proxy running” means the local listener started. It does not prove Telegram is
 reachable. FakeTLS provides transport camouflage; it is not a guarantee of
@@ -55,6 +55,14 @@ Go module uses only the standard library. `go.sum` is not needed until external
 Go dependencies are added. The optional desktop entry point now requires a valid
 `UMBRA_PROXY_SECRET` environment variable; it no longer starts with a known
 default secret.
+
+## Logs
+
+The viewer records original event time, severity, source, PID and exception traces
+directly from Kotlin and Go. It supports search, independent level filters,
+optional DEBUG capture, pause/follow controls, and text/JSONL export. It keeps the
+last 1,000 events in process memory and reports retention/queue losses explicitly.
+See [logging details and limits](docs/LOGGING.md).
 
 ## Connect
 
@@ -124,3 +132,14 @@ last published build). Verify signing and installation before publishing. Keep s
 
 The repository does not currently declare a license. Confirm the provenance and
 license of reused core code before public redistribution.
+
+## Custom connection links
+
+`127.0.0.1` refers to the same phone and matches the local listener. A display
+name or arbitrary text is not a routable replacement for this address. A custom
+hostname would have to resolve to loopback, and DNS rebinding protections or
+client resolvers may block it; this is less reliable than the numeric address.
+A branded HTTPS sharing link can redirect to the existing Telegram proxy link
+without changing its local server address, but needs a domain/hosting you control.
+Changing this field to a remote domain does not turn the phone's local listener
+into a remote proxy.
