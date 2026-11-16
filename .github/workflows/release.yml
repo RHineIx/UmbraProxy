@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           for variable in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            [[ -n "${!variable}" ]] || {
+            [[ -n "${!variable:-}" ]] || {
               echo "Missing required repository secret: $variable" >&2
               exit 1
             }
