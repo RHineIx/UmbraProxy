@@ -63,7 +63,7 @@ class ProxyTileService : TileService() {
         tile.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         
         // Explicitly set the custom icon to ensure it's loaded correctly
-        tile.icon = Icon.createWithResource(this, R.drawable.tile)
+        tile.icon = Icon.createWithResource(this, R.drawable.ic_tabler_shield_lock)
         
         // Update labels based on state
         tile.label = "UmbraProxy"

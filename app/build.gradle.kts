@@ -132,7 +132,6 @@ dependencies {
     testImplementation("org.json:json:20260814")
 
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
-    implementation("androidx.compose.material:material-icons-extended")
 }
 
 // Packaging without the Go libraries produces an APK whose proxy cannot start.
