@@ -465,7 +465,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     try { context.startActivity(intent) } catch (e: Exception) { Toast.makeText(context, context.getString(R.string.msg_tg_not_installed), Toast.LENGTH_SHORT).show() }
                 }, enabled = isRunning, modifier = Modifier.weight(3f).height(56.dp), shape = RoundedCornerShape(16.dp)) {
-                    Icon(painter = painterResource(id = R.drawable.ic_tabler_brand_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.btn_launch_telegram), style = MaterialTheme.typography.titleMedium)
                 }
             }
@@ -503,7 +503,7 @@ fun MainConnectionToggle(isRunning: Boolean, isStarting: Boolean, onClick: () ->
     Surface(modifier = Modifier.size(140.dp).scale(scale).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         shape = CircleShape, color = buttonColor, shadowElevation = if (isActiveVisual) 12.dp else 2.dp) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(painter = painterResource(id = R.drawable.ic_tabler_brand_telegram), contentDescription = null, tint = iconColor, modifier = Modifier.size(68.dp))
+            Icon(painter = painterResource(id = R.drawable.ic_telegram), contentDescription = null, tint = iconColor, modifier = Modifier.size(68.dp).offset(x = (-4).dp, y = 2.dp))
         }
     }
 }
