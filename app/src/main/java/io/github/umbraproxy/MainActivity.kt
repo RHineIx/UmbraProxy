@@ -125,6 +125,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val isStarting by ProxyService.isStarting.collectAsStateWithLifecycle() // 🚀 FIXED: True sync from service
     val liveStats by ProxyService.liveStats.collectAsStateWithLifecycle()
+    val health by ProxyService.health.collectAsStateWithLifecycle()
     val isReady by settingsStore.isReady.collectAsStateWithLifecycle(initialValue = false)
 
     val savedPort by settingsStore.port.collectAsStateWithLifecycle(initialValue = "1443")
@@ -307,8 +308,21 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
             })
 
             Spacer(modifier = Modifier.height(24.dp))
-            Text(text = when { isStarting -> stringResource(R.string.status_connecting); isRunning -> stringResource(R.string.status_connected); else -> stringResource(R.string.status_standby) },
-                style = MaterialTheme.typography.titleMedium, color = if (isRunning || isStarting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = stringResource(health.labelResource(isRunning, isStarting)),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                color = when {
+                    isRunning && health.status in setOf(ConnectionStatus.UNAVAILABLE, ConnectionStatus.OFFLINE, ConnectionStatus.STOPPED) -> MaterialTheme.colorScheme.error
+                    isRunning || isStarting -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+            if (isRunning) {
+                Text(stringResource(R.string.health_hint), style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp))
+            }
 
             AnimatedVisibility(
                 visible = isRunning,

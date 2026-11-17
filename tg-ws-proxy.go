@@ -63,10 +63,6 @@ const (
 
 	wsPoolMaxAge = 120.0
 
-	dcFailCooldown = 10.0
-
-	wsFailTimeout = 2.0
-
 	poolMaintainInterval = 5
 
 	// Bridge read deadlines — short enough to detect dead connections on mobile
@@ -84,7 +80,7 @@ const (
 	cfproxyCacheFileName    = "cfproxy-domains-cache.txt"
 	cfproxyActiveFileName   = "cfproxy-active-domain.txt"
 	cfproxyRefreshInterval  = 12 * time.Hour
-	cfproxyDialPhaseTimeout = 4 * time.Second
+	cfproxyDialPhaseTimeout = 2 * time.Second
 	cfproxyFallbackParallel = 2
 	cfproxy429Cooldown      = 45 * time.Second
 	cfproxy429MaxCooldown   = 5 * time.Minute
@@ -307,6 +303,9 @@ func mergeCfproxyDomains(lists ...[]string) []string {
 			}
 			seen[domain] = struct{}{}
 			merged = append(merged, domain)
+			if len(merged) == maxRouteCandidates {
+				return merged
+			}
 		}
 	}
 	return merged
@@ -318,13 +317,17 @@ func clearCfproxy429Cooldowns() {
 	cfproxy429Mu.Unlock()
 }
 
-func clearCfproxy429Cooldown(domain string) {
+func clearCfproxy429Cooldown(ctx context.Context, domain string) {
 	domain = normalizeCfDomain(domain)
 	if domain == "" {
 		return
 	}
 
 	cfproxy429Mu.Lock()
+	if ctx.Err() != nil {
+		cfproxy429Mu.Unlock()
+		return
+	}
 	delete(cfproxy429StateByDomain, domain)
 	cfproxy429Mu.Unlock()
 }
@@ -380,7 +383,7 @@ func nextCfproxy429CooldownDelay(prev cfproxy429State, retryAfter time.Duration)
 	return delay
 }
 
-func markCfproxy429Cooldown(domain string, err error) {
+func markCfproxy429Cooldown(ctx context.Context, domain string, err error) {
 	domain = normalizeCfDomain(domain)
 	if domain == "" {
 		return
@@ -388,6 +391,10 @@ func markCfproxy429Cooldown(domain string, err error) {
 
 	retryAfter := retryAfterDelay(err)
 	cfproxy429Mu.Lock()
+	if ctx.Err() != nil {
+		cfproxy429Mu.Unlock()
+		return
+	}
 	prev := cfproxy429StateByDomain[domain]
 	delay := nextCfproxy429CooldownDelay(prev, retryAfter)
 	strikes := prev.strikes + 1
@@ -418,9 +425,6 @@ func cfproxy429CooldownRemaining(domain string) time.Duration {
 
 	remaining := time.Until(state.until)
 	if remaining <= 0 {
-		cfproxy429Mu.Lock()
-		delete(cfproxy429StateByDomain, domain)
-		cfproxy429Mu.Unlock()
 		return 0
 	}
 	return remaining
@@ -631,6 +635,9 @@ func tryRefreshCfproxyDomains(ctx context.Context) bool {
 		}
 		if domain := normalizeCfDomain(decodeCfDomain(line)); domain != "" {
 			newDomains = append(newDomains, domain)
+			if len(newDomains) == maxRouteCandidates {
+				break
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -678,12 +685,6 @@ var dcOverrides = map[int]int{
 var (
 	dcOpt   map[int]string
 	dcOptMu sync.RWMutex
-
-	wsBlackMu   sync.RWMutex
-	wsBlacklist = make(map[[2]int]bool)
-
-	dcFailMu    sync.RWMutex
-	dcFailUntil = make(map[[2]int]float64)
 
 	zero64 = make([]byte, 64)
 )
@@ -855,11 +856,13 @@ func (e *WsHandshakeError) IsRedirect() bool {
 }
 
 type RawWebSocket struct {
-	conn      net.Conn
-	bufReader *bufio.Reader
-	writeMu   sync.Mutex
-	closed    atomic.Bool
-	closeOnce sync.Once
+	conn          net.Conn
+	bufReader     *bufio.Reader
+	writeMu       sync.Mutex
+	closed        atomic.Bool
+	closeOnce     sync.Once
+	fragmented    bool
+	fragmentBytes uint64
 }
 
 type dohResponse struct {
@@ -1047,6 +1050,11 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 		return nil, fmt.Errorf("empty dial address")
 	}
 
+	return wsConnectAddress(ctx, net.JoinHostPort(dialAddr, "443"), domain, path, timeout)
+}
+
+// Address-based entry point keeps loopback TLS/upgrade tests independent of port 443.
+func wsConnectAddress(ctx context.Context, targetAddr, domain, path string, timeout time.Duration) (*RawWebSocket, error) {
 	dialer := &net.Dialer{
 		Timeout: timeout,
 	}
@@ -1054,7 +1062,6 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 	tlsCfg := tlsConfigPool.Clone()
 	tlsCfg.ServerName = domain
 
-	targetAddr := net.JoinHostPort(dialAddr, "443")
 	rawConn, err := dialer.DialContext(ctx, "tcp", targetAddr)
 	if err != nil {
 		return nil, err
@@ -1074,7 +1081,7 @@ func wsConnectOnce(ctx context.Context, dialAddr, domain, path string, timeout t
 	_ = tlsConn.SetDeadline(time.Now().Add(handshakeTimeout))
 	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		rawConn.Close()
-		logDebug.Printf(" ws tls fail %s via %s: %s", domain, dialAddr, compactConnError(err))
+		logDebug.Printf(" ws tls fail %s via %s: %s", domain, targetAddr, compactConnError(err))
 		return nil, err
 	}
 	_ = tlsConn.SetDeadline(time.Time{})
@@ -1199,6 +1206,8 @@ func cfConnectDomain(ctx context.Context, domain, path string, timeout float64) 
 	}
 
 	attemptTimeout := wsConnectTimeout(timeout)
+	ctx, cancelAttempt := context.WithTimeout(ctx, attemptTimeout)
+	defer cancelAttempt()
 	phaseTimeout := attemptTimeout
 	if phaseTimeout > cfproxyDialPhaseTimeout {
 		phaseTimeout = cfproxyDialPhaseTimeout
@@ -1264,34 +1273,23 @@ func wsConnect(ctx context.Context, ip, domain, path string, timeout float64) (*
 	return nil, err
 }
 
-func connectDirectWS(ctx context.Context, target string, domains []string, timeout float64) (*RawWebSocket, bool, bool) {
-	if len(domains) == 0 {
-		return nil, false, false
-	}
-
-	wsFailedRedirect := false
-	allRedirects := true
-
-	for _, dom := range domains {
-		ws, err := wsConnect(ctx, target, dom, "/apiws", timeout)
+func connectDirectWS(ctx context.Context, target string, domains []string, timeout float64) (*RawWebSocket, string) {
+	ctx, cancel := routeStageContext(ctx, directConnectBudget, tcpConnectBudget)
+	defer cancel()
+	for _, domain := range domains {
+		key := directRouteKey(target, domain)
+		if ctx.Err() != nil || !routeCacheFor(ctx).begin(ctx, key) {
+			continue
+		}
+		ws, err := wsConnect(ctx, target, domain, "/apiws", timeout)
+		routeCacheFor(ctx).record(ctx, key, err)
 		if err == nil {
-			return ws, wsFailedRedirect, false
+			return ws, domain
 		}
-
 		stats.wsErrors.Add(1)
-		var wsErr *WsHandshakeError
-		if errors.As(err, &wsErr) {
-			if wsErr.IsRedirect() {
-				wsFailedRedirect = true
-			} else {
-				allRedirects = false
-			}
-		} else {
-			allRedirects = false
-		}
+		logDebug.Printf(" WS fail %s: %s", domain, compactConnError(err))
 	}
-
-	return nil, wsFailedRedirect, allRedirects
+	return nil, ""
 }
 
 func (ws *RawWebSocket) writeFrame(frame []byte, timeout time.Duration) error {
@@ -1403,6 +1401,8 @@ func (ws *RawWebSocket) Recv() ([]byte, error) {
 			continue
 		case opText, opBinary:
 			return payload, nil
+		case 0: // Continuation payload is part of the same MTProto byte stream.
+			return payload, nil
 		}
 	}
 	return nil, io.EOF
@@ -1503,6 +1503,30 @@ func (ws *RawWebSocket) readFrame() (int, []byte, error) {
 	}
 
 	opcode := int(hdr[0] & 0x0F)
+	final := hdr[0]&0x80 != 0
+	if hdr[0]&0x70 != 0 {
+		return 0, nil, fmt.Errorf("unnegotiated WebSocket extension bits")
+	}
+	if hdr[1]&0x80 != 0 {
+		return 0, nil, fmt.Errorf("masked server WebSocket frame")
+	}
+	control := opcode >= opClose
+	if control && (!final || hdr[1]&0x7f > 125) {
+		return 0, nil, fmt.Errorf("invalid WebSocket control frame")
+	}
+	switch opcode {
+	case 0:
+		if !ws.fragmented {
+			return 0, nil, fmt.Errorf("unexpected WebSocket continuation")
+		}
+	case opText, opBinary:
+		if ws.fragmented {
+			return 0, nil, fmt.Errorf("interleaved WebSocket data message")
+		}
+	case opClose, opPing, opPong:
+	default:
+		return 0, nil, fmt.Errorf("unknown WebSocket opcode %d", opcode)
+	}
 	length := uint64(hdr[1] & 0x7F)
 
 	if length == 126 {
@@ -1519,27 +1543,31 @@ func (ws *RawWebSocket) readFrame() (int, []byte, error) {
 		length = binary.BigEndian.Uint64(buf[:])
 	}
 
-	hasMask := (hdr[1] & 0x80) != 0
-	var maskKey [4]byte
-	if hasMask {
-		if _, err := io.ReadFull(ws.bufReader, maskKey[:]); err != nil {
-			return 0, nil, err
-		}
-	}
-
 	const maxFramePayload = 16 * 1024 * 1024
 	if length > maxFramePayload {
 		return 0, nil, fmt.Errorf("frame too large: %d bytes", length)
+	}
+	if !control {
+		if opcode != 0 {
+			ws.fragmentBytes = 0
+		}
+		if length > maxFramePayload-ws.fragmentBytes {
+			return 0, nil, fmt.Errorf("WebSocket message too large")
+		}
+		ws.fragmentBytes += length
+		ws.fragmented = !final
+		if final {
+			ws.fragmentBytes = 0
+		}
+	}
+	if opcode == opClose && length == 1 {
+		return 0, nil, fmt.Errorf("invalid WebSocket close payload")
 	}
 	payload := make([]byte, length)
 	if length > 0 {
 		if _, err := io.ReadFull(ws.bufReader, payload); err != nil {
 			return 0, nil, err
 		}
-	}
-
-	if hasMask {
-		xorMaskInPlace(payload, maskKey[:])
 	}
 
 	return opcode, payload, nil
@@ -1928,6 +1956,7 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 	label string, dc int, dst string, port int, isMedia bool,
 	splitter *MsgSplitter, cltDec, cltEnc, tgEnc, tgDec cipher.Stream) {
 
+	defer relayHealth(ctx, fmt.Sprintf("WS DC%d: %s", dc, dst))()
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -2052,6 +2081,7 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 
 func bridgeTCP(ctx context.Context, client, remote net.Conn,
 	label string, dc int, dst string, port int, isMedia bool, cltDec, cltEnc, tgEnc, tgDec cipher.Stream) {
+	defer relayHealth(ctx, fmt.Sprintf("TCP DC%d", dc))()
 
 	ctx2, cancel := context.WithCancel(ctx)
 
@@ -2099,21 +2129,33 @@ func bridgeTCP(ctx context.Context, client, remote net.Conn,
 	wg.Wait()
 }
 
-func tcpFallback(ctx context.Context, client net.Conn, dst string, port int,
+func tcpFallback(ctx, connectCtx context.Context, client net.Conn, dst string, port int,
 	init []byte, label string, dc int, isMedia bool, cltDec, cltEnc, tgEnc, tgDec cipher.Stream) bool {
-
-	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 60 * time.Second,
-	}
-	remote, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(dst, strconv.Itoa(port)))
-	if err != nil {
+	key := tcpRouteKey(dst)
+	dialCtx, cancel := routeStageContext(connectCtx, tcpConnectBudget, 0)
+	defer cancel()
+	if !routeCacheFor(ctx).begin(dialCtx, key) {
 		return false
 	}
-
+	dialer := &net.Dialer{Timeout: tcpConnectBudget, KeepAlive: 60 * time.Second}
+	remote, err := dialer.DialContext(dialCtx, "tcp", net.JoinHostPort(dst, strconv.Itoa(port)))
+	if err == nil {
+		stop := context.AfterFunc(dialCtx, func() { remote.Close() })
+		_, err = remote.Write(init)
+		if !stop() && err == nil {
+			err = dialCtx.Err()
+		}
+	}
+	routeCacheFor(ctx).record(dialCtx, key, err)
+	if err != nil {
+		if remote != nil {
+			remote.Close()
+		}
+		logDebug.Printf(" TCP fail DC%d: %s", dc, compactConnError(err))
+		return false
+	}
 	stats.connectionsTcpFallback.Add(1)
 	logInfo.Printf(" DC%d%s connected via TCP", dc, mediaTag(isMedia))
-	_, _ = remote.Write(init)
 	bridgeTCP(ctx, client, remote, label, dc, dst, port, isMedia, cltDec, cltEnc, tgEnc, tgDec)
 	return true
 }
@@ -2127,18 +2169,26 @@ func tryCfproxyBaseDomain(ctx context.Context, dc int, baseDomain string) (*RawW
 		logDebug.Printf(" CF skip %s: 429 cooldown %.0fs", baseDomain, math.Ceil(remaining.Seconds()))
 		return nil, ""
 	}
+	key := cfRouteKey(dc, baseDomain)
+	if !routeCacheFor(ctx).allowed(key) {
+		return nil, ""
+	}
 	if !acquireCfproxyAttemptSlot(ctx) {
 		return nil, ""
 	}
 	defer releaseCfproxyAttemptSlot()
+	if cfproxy429CooldownRemaining(baseDomain) > 0 || !routeCacheFor(ctx).begin(ctx, key) {
+		return nil, ""
+	}
 
 	domain := fmt.Sprintf("kws%d.%s", dc, baseDomain)
 	logDebug.Printf(" CF try %s", domain)
 
 	ws, resolvedIP, err := cfConnectDomain(ctx, domain, "/apiws", 5)
+	routeCacheFor(ctx).record(ctx, key, err)
 	if err != nil {
 		if ctx.Err() == nil && isHTTPStatusError(err, http.StatusTooManyRequests) {
-			markCfproxy429Cooldown(baseDomain, err)
+			markCfproxy429Cooldown(ctx, baseDomain, err)
 		}
 		if ctx.Err() == nil {
 			if resolvedIP != "" {
@@ -2150,7 +2200,7 @@ func tryCfproxyBaseDomain(ctx context.Context, dc int, baseDomain string) (*RawW
 		return nil, ""
 	}
 
-	clearCfproxy429Cooldown(baseDomain)
+	clearCfproxy429Cooldown(ctx, baseDomain)
 	if resolvedIP != "" {
 		logDebug.Printf(" CF ok %s via %s", domain, resolvedIP)
 	} else {
@@ -2159,14 +2209,12 @@ func tryCfproxyBaseDomain(ctx context.Context, dc int, baseDomain string) (*RawW
 	return ws, baseDomain
 }
 
-func cfproxyFallback(ctx context.Context, conn net.Conn, relayInit []byte, label string,
-	dc int, isMedia bool, splitter *MsgSplitter,
-	cltDec, cltEnc, tgEnc, tgDec cipher.Stream) bool {
+func connectCfproxy(ctx context.Context, dc int, isMedia bool) (*RawWebSocket, string, error) {
 
 	cfproxyMu.RLock()
 	if !cfproxyEnabled || len(cfproxyDomains) == 0 {
 		cfproxyMu.RUnlock()
-		return false
+		return nil, "", fmt.Errorf("CF routes unavailable or cooling down")
 	}
 	active := activeCfDomain
 	domains := make([]string, len(cfproxyDomains))
@@ -2252,7 +2300,7 @@ func cfproxyFallback(ctx context.Context, conn net.Conn, relayInit []byte, label
 
 	if ws == nil {
 		logWarn.Printf(" CF fallback DC%d%s: all CF domains unavailable", dc, mTag)
-		return false
+		return nil, "", fmt.Errorf("CF routes unavailable or cooling down")
 	}
 
 	if chosenDomain != "" && chosenDomain != active {
@@ -2263,19 +2311,30 @@ func cfproxyFallback(ctx context.Context, conn net.Conn, relayInit []byte, label
 		logInfo.Printf(" CF domain  %s", chosenDomain)
 	}
 
-	stats.connectionsCfproxy.Add(1)
-	logInfo.Printf(" DC%d%s connected via CF", dc, mTag)
+	return ws, chosenDomain, nil
+}
 
-	if err := ws.Send(relayInit); err != nil {
-		ws.Close()
+func cfproxyFallback(ctx, connectCtx context.Context, conn net.Conn, relayInit []byte, label string,
+	dc int, isMedia bool, splitter *MsgSplitter,
+	cltDec, cltEnc, tgEnc, tgDec cipher.Stream) bool {
+	dialCtx, cancel := routeStageContext(connectCtx, cfConnectBudget, tcpConnectBudget)
+	defer cancel()
+	ws, chosenDomain, err := connectCfproxy(dialCtx, dc, isMedia)
+	if err != nil {
 		return false
 	}
-
+	if err := sendWSInit(dialCtx, ws, relayInit); err != nil {
+		ws.Close()
+		routeCacheFor(ctx).record(dialCtx, cfRouteKey(dc, chosenDomain), err)
+		return false
+	}
+	stats.connectionsCfproxy.Add(1)
+	logInfo.Printf(" DC%d%s connected via CF", dc, mediaTag(isMedia))
 	bridgeWS(ctx, conn, ws, label, dc, chosenDomain, 443, isMedia, splitter, cltDec, cltEnc, tgEnc, tgDec)
 	return true
 }
 
-func doFallback(ctx context.Context, conn net.Conn, relayInit []byte, label string,
+func doFallback(ctx, connectCtx context.Context, conn net.Conn, relayInit []byte, label string,
 	dc int, isMedia bool, splitter *MsgSplitter,
 	cltDec, cltEnc, tgEnc, tgDec cipher.Stream) bool {
 
@@ -2299,17 +2358,22 @@ func doFallback(ctx context.Context, conn net.Conn, relayInit []byte, label stri
 	cfproxyMu.RUnlock()
 
 	if useCf {
-		if cfproxyFallback(ctx, conn, relayInit, label, dc, isMedia, splitter, cltDec, cltEnc, tgEnc, tgDec) {
+		if cfproxyFallback(ctx, connectCtx, conn, relayInit, label, dc, isMedia, splitter, cltDec, cltEnc, tgEnc, tgDec) {
 			return true
 		}
 	}
 
 	if fallbackDst != "" {
-		if tcpFallback(ctx, conn, fallbackDst, 443, relayInit, label, dc, isMedia, cltDec, cltEnc, tgEnc, tgDec) {
+		if tcpFallback(ctx, connectCtx, conn, fallbackDst, 443, relayInit, label, dc, isMedia, cltDec, cltEnc, tgEnc, tgDec) {
 			return true
 		}
 	}
 
+	if ctx.Err() == nil {
+		if h := healthFor(ctx); h != nil {
+			h.result("", fmt.Errorf("DC%d routes failed, timed out, or are cooling down; inspect Core logs", dc))
+		}
+	}
 	return false
 }
 
@@ -2625,8 +2689,6 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		dc = -dc
 	}
 	isMedia := dcRaw < 0
-	mTag := mediaTag(isMedia)
-
 	cltEncPrekeyAndIv := make([]byte, 48)
 	for i := 0; i < 48; i++ {
 		cltEncPrekeyAndIv[i] = handshake[8+47-i]
@@ -2684,101 +2746,26 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		relayInit[56+i] = tailPlain[i] ^ keystreamTail[i]
 	}
 
-	dcKey := [2]int{dc, isMediaInt(isMedia)}
-	now := float64(time.Now().UnixNano()) / 1e9
-
+	connectCtx, cancelConnect := context.WithTimeout(ctx, upstreamConnectBudget)
+	defer cancelConnect()
 	splitter, _ := newMsgSplitter(relayInit, proto)
-
 	target, dcConfigured := resolveConfiguredTarget(dc, isMedia)
-
-	wsBlackMu.RLock()
-	blacklisted := wsBlacklist[dcKey]
-	wsBlackMu.RUnlock()
-
-	if !dcConfigured || blacklisted {
-		doFallback(ctx, clientConn, relayInit, label, dc, isMedia, splitter, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
-		return
-	}
-
-	dcFailMu.RLock()
-	failUntil := dcFailUntil[dcKey]
-	dcFailMu.RUnlock()
-
-	wsTimeout := 10.0
-	if now < failUntil {
-		wsTimeout = wsFailTimeout
-	}
-
-	domains := wsDomains(dc, isMedia)
-	ws, wsFailedRedirect, allRedirects := connectDirectWS(ctx, target, domains, wsTimeout)
-
-	if ws == nil {
-		logWarn.Printf(" DC%d%s: all WS attempts failed", dc, mTag)
-		if wsFailedRedirect && allRedirects {
-			wsBlackMu.Lock()
-			wsBlacklist[dcKey] = true
-			wsBlackMu.Unlock()
-			logWarn.Printf(" DC%d%s is blocked (302)", dc, mTag)
-		} else {
-			dcFailMu.Lock()
-			dcFailUntil[dcKey] = now + dcFailCooldown
-			dcFailMu.Unlock()
-		}
-
-		splitterFb, _ := newMsgSplitter(relayInit, proto)
-		doFallback(ctx, clientConn, relayInit, label, dc, isMedia, splitterFb, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
-		return
-	}
-
-	sendDirectInit := func(activeWS *RawWebSocket) error {
-		if err := activeWS.Send(relayInit); err != nil {
-			return err
-		}
-		logDebug.Printf(" direct relayInit sent DC%d%s", dc, mTag)
-		return nil
-	}
-
-	if err := sendDirectInit(ws); err != nil {
-		logWarn.Printf(" direct relayInit write fail DC%d%s: %s", dc, mTag, compactConnError(err))
-		ws.Close()
-
-		dcFailMu.Lock()
-		dcFailUntil[dcKey] = now + dcFailCooldown
-		dcFailMu.Unlock()
-
-		logWarn.Printf(" direct retry fresh ws DC%d%s", dc, mTag)
-		retryWS, retryFailedRedirect, retryAllRedirects := connectDirectWS(ctx, target, domains, wsTimeout)
-		if retryWS == nil {
-			if retryFailedRedirect && retryAllRedirects {
-				wsBlackMu.Lock()
-				wsBlacklist[dcKey] = true
-				wsBlackMu.Unlock()
-				logWarn.Printf(" DC%d%s is blocked (302)", dc, mTag)
+	if dcConfigured {
+		domains := wsDomains(dc, isMedia)
+		ws, domain := connectDirectWS(connectCtx, target, domains, 4)
+		if ws != nil {
+			if err := sendWSInit(connectCtx, ws, relayInit); err == nil {
+				cancelConnect()
+				stats.connectionsWs.Add(1)
+				bridgeWS(ctx, clientConn, ws, label, dc, target, 443, isMedia, splitter, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
+				return
 			}
-			logWarn.Printf(" direct fallback DC%d%s", dc, mTag)
-			splitterFb, _ := newMsgSplitter(relayInit, proto)
-			doFallback(ctx, clientConn, relayInit, label, dc, isMedia, splitterFb, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
-			return
-		}
-
-		ws = retryWS
-		if err = sendDirectInit(ws); err != nil {
-			logWarn.Printf(" direct relayInit write fail DC%d%s: %s", dc, mTag, compactConnError(err))
 			ws.Close()
-			logWarn.Printf(" direct fallback DC%d%s", dc, mTag)
-			splitterFb, _ := newMsgSplitter(relayInit, proto)
-			doFallback(ctx, clientConn, relayInit, label, dc, isMedia, splitterFb, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
-			return
+			routeCacheFor(ctx).record(connectCtx, directRouteKey(target, domain), fmt.Errorf("initial relay write failed"))
 		}
 	}
+	doFallback(ctx, connectCtx, clientConn, relayInit, label, dc, isMedia, splitter, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
 
-	dcFailMu.Lock()
-	delete(dcFailUntil, dcKey)
-	dcFailMu.Unlock()
-
-	stats.connectionsWs.Add(1)
-
-	bridgeWS(ctx, clientConn, ws, label, dc, target, 443, isMedia, splitter, cltDecryptor, cltEncryptor, tgEncryptor, tgDecryptor)
 }
 
 // ---------------------------------------------------------------------------
@@ -2798,6 +2785,16 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		signalProxyStart(started, fmt.Errorf("listen on %s: %w", addr, err))
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
+	h := healthFor(ctx)
+	if h == nil {
+		h = &proxyHealth{}
+		ctx = context.WithValue(ctx, proxyHealthKey{}, h)
+		currentHealth.Store(h)
+	}
+	h.mu.Lock()
+	h.listening = true
+	h.mu.Unlock()
+	defer func() { h.mu.Lock(); h.listening = false; h.mu.Unlock() }()
 	signalProxyStart(started, nil)
 
 	srvCtx, srvCancel := context.WithCancel(ctx)
@@ -2921,6 +2918,7 @@ func startProxy(host string, port int, dcIps, secret string, verbose bool) int {
 	}
 
 	initLogging(verbose)
+	routeFailures.clear()
 	clearCfproxy429Cooldowns()
 	proxySecretMu.Lock()
 	proxySecret = secret
@@ -2928,6 +2926,9 @@ func startProxy(host string, port int, dcIps, secret string, verbose bool) int {
 	initCfproxyDomains()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	h := &proxyHealth{}
+	ctx = context.WithValue(ctx, proxyHealthKey{}, h)
+	currentHealth.Store(h)
 	done := make(chan struct{})
 	globalCtx, globalCancel, globalDone = ctx, cancel, done
 	started := make(chan error, 1)
@@ -2965,12 +2966,7 @@ func stopProxy() int {
 	<-globalDone
 	globalCancel, globalCtx, globalDone = nil, nil, nil
 	stats.Reset()
-	wsBlackMu.Lock()
-	wsBlacklist = make(map[[2]int]bool)
-	wsBlackMu.Unlock()
-	dcFailMu.Lock()
-	dcFailUntil = make(map[[2]int]float64)
-	dcFailMu.Unlock()
+	routeFailures.clear()
 	clearCfproxy429Cooldowns()
 	logInfo.Println("Proxy stopped; listener and clients closed")
 	return 0
@@ -3030,6 +3026,12 @@ func SetSecret(cSecret *C.char) {
 	proxySecret = s
 	proxySecretMu.Unlock()
 }
+
+//export GetHealth
+func GetHealth() *C.char { return C.CString(string(encodeHealth(currentHealth.Load()))) }
+
+//export ProbeHealth
+func ProbeHealth() *C.char { return C.CString(string(probeUpstreamHealth())) }
 
 //export GetStats
 func GetStats() *C.char {

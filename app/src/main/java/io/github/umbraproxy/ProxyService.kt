@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -19,8 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.net.InetSocketAddress
-import java.net.Socket
 
 class ProxyService : Service() {
 
@@ -35,6 +32,8 @@ class ProxyService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var statsUpdateJob: Job? = null
     private var watchdogJob: Job? = null
+    private var healthProbeJob: Job? = null
+    private var networkAvailable = false
 
     @Volatile private var stopping = false
     private var lastPoolSize = 4
@@ -66,11 +65,15 @@ class ProxyService : Service() {
         private val _liveStats = MutableStateFlow(ProxyStats())
         val liveStats: StateFlow<ProxyStats> = _liveStats
 
+        private val _health = MutableStateFlow(ProxyHealth())
+        val health: StateFlow<ProxyHealth> = _health
+
         fun updateState(running: Boolean) {
             _isRunning.value = running
             _isStarting.value = false
             if (!running) {
                 _liveStats.value = ProxyStats()
+                _health.value = ProxyHealth()
             }
         }
     }
@@ -86,6 +89,7 @@ class ProxyService : Service() {
     private fun setupNetworkMonitor() {
         try {
             connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkAvailable = connectivityManager?.activeNetwork != null
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 private var previousNetwork: Network? = null
                 private var networkLost = false
@@ -97,13 +101,21 @@ class ProxyService : Service() {
                         val changed = previousNetwork != null && (previousNetwork != network || networkLost)
                         previousNetwork = network
                         networkLost = false
+                        networkAvailable = true
+                        if (_isRunning.value && _health.value.status == ConnectionStatus.OFFLINE) {
+                            _health.value = ProxyHealth(ConnectionStatus.CHECKING, listening = true)
+                        }
                         if (changed) scheduleSoftRestart("Default network changed")
                     }
                 }
 
                 override fun onLost(network: Network) {
                     serviceScope.launch {
-                        if (previousNetwork == network) networkLost = true
+                        if (previousNetwork == network) {
+                            networkLost = true
+                            networkAvailable = false
+                            if (_isRunning.value) publishHealth(ProxyHealth(ConnectionStatus.OFFLINE, listening = true))
+                        }
                     }
                 }
             }
@@ -126,6 +138,7 @@ class ProxyService : Service() {
 
                 AppLog.i("Service", "Triggering soft restart due to: $reason")
                 _isStarting.value = true
+                _health.value = ProxyHealth(ConnectionStatus.CHECKING, listening = true)
                 updateNotification(getString(R.string.status_connecting))
 
                 withContext(Dispatchers.IO) {
@@ -140,7 +153,7 @@ class ProxyService : Service() {
                         if (success && !stopping) {
                             _isStarting.value = false
                             AppLog.i("Service", "Soft restart completed successfully")
-                            startWatchdogAndStats(lastPort)
+                            startWatchdogAndStats()
                         } else if (!success) {
                             AppLog.e("Service", "Soft restart failed, initiating full shutdown")
                             stopProxyInternal()
@@ -194,7 +207,8 @@ class ProxyService : Service() {
                     }
                     if (success && !stopping) {
                         updateState(true)
-                        startWatchdogAndStats(lastPort)
+                        _health.value = ProxyHealth(ConnectionStatus.WAITING, listening = true)
+                        startWatchdogAndStats()
                     } else {
                         _isStarting.value = false
                         stopSelf()
@@ -211,23 +225,43 @@ class ProxyService : Service() {
         return START_STICKY
     }
 
-    private fun startWatchdogAndStats(port: Int) {
+    private fun startWatchdogAndStats() {
         watchdogJob?.cancel()
         statsUpdateJob?.cancel()
 
+        healthProbeJob?.cancel()
         watchdogJob = serviceScope.launch {
-            delay(3000)
-            if (_isRunning.value) {
-                val isListening = withContext(Dispatchers.IO) {
-                    try {
-                        Socket().use { socket ->
-                            socket.connect(InetSocketAddress("127.0.0.1", port), 2000)
-                            true
-                        }
-                    } catch (e: Exception) { false }
+            while (isActive && !stopping) {
+                val nativeHealth = withContext(Dispatchers.IO) { NativeProxy.getHealth() }
+                if (!stopping && _isRunning.value) {
+                    publishHealth(when {
+                        !networkAvailable -> ProxyHealth(ConnectionStatus.OFFLINE, listening = nativeHealth?.listening == true)
+                        nativeHealth != null -> nativeHealth
+                        else -> ProxyHealth(ConnectionStatus.UNAVAILABLE, lastError = "Native health unavailable")
+                    })
+                    // An unavailable upstream does not require restarting a healthy listener.
+                    if ((nativeHealth == null || !nativeHealth.listening) && !_isStarting.value) {
+                        scheduleSoftRestart("Native listener unavailable")
+                    }
                 }
-                if (!isListening) {
-                    updateNotification(getString(R.string.core_unresponsive))
+                delay(2000)
+            }
+        }
+        healthProbeJob = serviceScope.launch {
+            var failures = 0
+            while (isActive && !stopping) {
+                if (networkAvailable && _isRunning.value && !_isStarting.value) {
+                    val result = withContext(Dispatchers.IO) { NativeProxy.probeHealth() }
+                    if (!stopping && _isRunning.value && networkAvailable && result != null) {
+                        publishHealth(result)
+                    }
+                    // Go skips external probes when an established relay is already active.
+                    val failed = result == null || result.status == ConnectionStatus.UNAVAILABLE
+                    val wait = ProxyHealth.probeDelayMillis(failures)
+                    failures = if (failed) (failures + 1).coerceAtMost(2) else 0
+                    delay(if (failed) wait else ProxyHealth.probeDelayMillis(0))
+                } else {
+                    delay(2000)
                 }
             }
         }
@@ -248,9 +282,22 @@ class ProxyService : Service() {
                     val down = extractValue(rawStats, "down=")
 
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
-                    updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
+                    val status = getString(_health.value.labelResource(_isRunning.value, _isStarting.value))
+                    updateNotification("$status · ${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
                 }
                 delay(2000)
+            }
+        }
+    }
+
+    private fun publishHealth(next: ProxyHealth) {
+        val previous = _health.value
+        _health.value = next
+        if (previous.status != next.status) {
+            if (next.status == ConnectionStatus.UNAVAILABLE) {
+                AppLog.w("Health", next.lastError.ifBlank { "No usable upstream route" })
+            } else {
+                AppLog.i("Health", "Connection state: ${next.status}" + next.route.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty())
             }
         }
     }
@@ -292,6 +339,7 @@ class ProxyService : Service() {
         updateState(false)
         statsUpdateJob?.cancel()
         watchdogJob?.cancel()
+        healthProbeJob?.cancel()
         reconnectJob?.cancel()
 
         serviceScope.launch {

@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
 
 /**
  * Controller for the Quick Settings Tile.
@@ -31,9 +32,9 @@ class ProxyTileService : TileService() {
         
         // Listen to the shared state from ProxyService
         stateJob = scope.launch {
-            ProxyService.isRunning.collect { running ->
-                updateTile(running)
-            }
+            combine(ProxyService.isRunning, ProxyService.isStarting, ProxyService.health) { running, starting, health ->
+                Triple(running, starting, health)
+            }.collect { (running, starting, health) -> updateTile(running, starting, health) }
         }
     }
 
@@ -56,7 +57,7 @@ class ProxyTileService : TileService() {
     /**
      * Updates the Tile appearance and state.
      */
-    private fun updateTile(active: Boolean) {
+    private fun updateTile(active: Boolean, starting: Boolean, health: ProxyHealth) {
         val tile = qsTile ?: return
         
         // Update state: Active (Colored) or Inactive (Greyed out)
@@ -68,7 +69,7 @@ class ProxyTileService : TileService() {
         // Update labels based on state
         tile.label = "UmbraProxy"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            tile.subtitle = getString(if (active) R.string.tile_active else R.string.tile_off)
+            tile.subtitle = getString(health.labelResource(active, starting))
         }
         
         tile.updateTile()

@@ -78,4 +78,10 @@
     <string name="logs_truncated">Message or exception exceeded the capture limit</string>
     <string name="logs_show_detail">Show exception trace</string>
     <string name="logs_hide_detail">Hide exception trace</string>
+    <string name="health_waiting">Local proxy ready</string>
+    <string name="health_checking">Checking route…</string>
+    <string name="health_available">Route available</string>
+    <string name="health_unavailable">No working route</string>
+    <string name="health_offline">No network connection</string>
+    <string name="health_hint">Open Telegram to verify connectivity.</string>
 </resources>

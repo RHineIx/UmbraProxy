@@ -13,9 +13,33 @@ same device. This is a Telegram proxy, not a device-wide VPN.
 - Foreground service, default-network change detection, Quick Settings tile, and optional boot startup.
 - English/Arabic resources, light/dark/system themes, live counters, and a structured log console with search, level filters and file export.
 
-“Proxy running” means the local listener started. It does not prove Telegram is
-reachable. FakeTLS provides transport camouflage; it is not a guarantee of
-anonymity. Third-party routing availability depends on the configured providers.
+The on/off control describes the local listener. The separate connection status
+distinguishes local readiness, checking, an available route, unavailable routes,
+and no network. Health checks probe a DC2 transport path; a successful TCP check
+only proves that its port is reachable, and a successful WebSocket check also
+verifies TLS and the HTTP upgrade. They do not authenticate a Telegram account or
+prove that every DC works. Confirm connectivity inside Telegram.
+
+The service polls native listener health every two seconds and attempts a soft
+restart if the listener disappears. External checks run only while Android has a
+default network and skip network activity when a relay is already established.
+Checks wait 30 seconds after a first failure, then 60 and at most 120 seconds;
+success and network restarts reset that backoff. The notification and Quick
+Settings subtitle use the same health state as the main screen.
+
+Each client gets a 15-second budget for upstream setup, separate from handshake
+and established-session lifetimes. Direct WebSocket attempts have a four-second
+phase; Cloudflare gets at most eight seconds and leaves three seconds for TCP.
+Failed endpoints retry after 2–60 seconds, with one retry in flight for an
+endpoint coming out of cooldown; healthy endpoints retain normal concurrency.
+HTTP 429 also uses its existing provider cooldown and Retry-After handling. A
+network restart clears per-run failures. Candidate lists are limited to 32.
+WebSocket continuation payloads are forwarded in order, including when ping/pong
+frames appear between fragments; malformed framing and messages over 16 MiB are
+rejected.
+
+FakeTLS provides transport camouflage; it is not a guarantee of anonymity.
+Third-party routing availability depends on the configured providers.
 
 ## Build
 

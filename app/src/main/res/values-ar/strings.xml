@@ -73,4 +73,10 @@
     <string name="logs_truncated">تجاوزت الرسالة أو الاستثناء حد التسجيل</string>
     <string name="logs_show_detail">عرض تفاصيل الاستثناء</string>
     <string name="logs_hide_detail">إخفاء تفاصيل الاستثناء</string>
+    <string name="health_waiting">البروكسي المحلي جاهز</string>
+    <string name="health_checking">جارٍ فحص المسار…</string>
+    <string name="health_available">مسار الاتصال متاح</string>
+    <string name="health_unavailable">تعذر الوصول عبر المسارات</string>
+    <string name="health_offline">لا يوجد اتصال بالشبكة</string>
+    <string name="health_hint">افتح تيليجرام للتحقق من الاتصال.</string>
 </resources>

@@ -22,6 +22,8 @@ interface ProxyLibrary : Library {
     fun SetSecret(secret: String)
     fun GetSecretWithPrefix(): Pointer?
     fun GetStats(): Pointer?
+    fun GetHealth(): Pointer?
+    fun ProbeHealth(): Pointer?
     fun FreeString(p: Pointer)
     fun DrainLogs(): Pointer?
     fun ClearLogs()
@@ -83,6 +85,11 @@ object NativeProxy {
     }
 
     fun getStats(): String? = readNativeString { it.GetStats() }
+
+    fun getHealth(): ProxyHealth? = readNativeString { it.GetHealth() }?.let(ProxyHealth::decode)
+
+    // Do not take the lifecycle monitor while probing: StopProxy cancels the Go context.
+    fun probeHealth(): ProxyHealth? = readNativeString { it.ProbeHealth() }?.let(ProxyHealth::decode)
 
     fun getSecretWithPrefix(): String? = readNativeString { it.GetSecretWithPrefix() }
 
