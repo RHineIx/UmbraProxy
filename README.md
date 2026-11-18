@@ -106,13 +106,34 @@ The connection pool selector is hidden because the existing pool is not connecte
 to the client transport path. Its implementation remains available for future
 work. Boot startup is optional and subject to Android/vendor background limits.
 
+## Appearance, language, and updates
+
+The floating palette contains appearance settings and Arabic / English language
+selection. Language changes apply immediately, including layout direction, and
+persist across restarts. On Android 13 and later, the selection is also available
+in Android's per-app language settings. Developer profile icons sit beside
+`@RHineIx` at the bottom of the main screen, with the installed version below.
+
+The download icon opens update checking against this repository's latest stable
+GitHub Release. The installed APK's native libraries determine ARM64, ARMv7, or
+universal selection; a missing architecture asset can fall back to universal.
+Version comparison respects numeric components and prerelease ordering. Android
+10 and later use the system Download Manager; older Android versions and devices
+without that service open the download in the browser. Installation remains a
+normal user action after download. Checking uses ordinary internet connectivity.
+A private repository requires browser sign-in and cannot provide anonymous update
+checks or direct Download Manager downloads. No GitHub credentials are bundled.
+
 ## Releases
 
 Pull requests and pushes to `master` run Go checks and Android unit tests, lint,
 and debug APK assembly. Creating and pushing a new tag such as `v1.4.2` runs the
 release workflow, builds and verifies all three APKs (ARM64, ARMv7, and universal),
 signs them, and publishes a GitHub Release with generated notes and SHA-256
-checksums. Tags with a suffix such as `v1.4.2-rc.1` publish a prerelease. The tag
+checksums. APK filenames are `UmbraProxy-arm64-v8a.apk`,
+`UmbraProxy-armeabi-v7a.apk`, and `UmbraProxy-universal.apk`; the release URL
+contains the version, and `/releases/latest/download/<filename>` stays stable
+for browser downloads. Tags with a suffix such as `v1.4.2-rc.1` publish a prerelease. The tag
 must include the updated workflow and native build script.
 
 Configure these repository **Actions secrets** using the existing production

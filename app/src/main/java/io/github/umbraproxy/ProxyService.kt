@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -139,7 +140,7 @@ class ProxyService : Service() {
                 AppLog.i("Service", "Triggering soft restart due to: $reason")
                 _isStarting.value = true
                 _health.value = ProxyHealth(ConnectionStatus.CHECKING, listening = true)
-                updateNotification(getString(R.string.status_connecting))
+                updateNotification(localizedString(R.string.status_connecting))
 
                 withContext(Dispatchers.IO) {
                     val success = NativeProxy.restartProxy(
@@ -179,7 +180,7 @@ class ProxyService : Service() {
 
         _isStarting.value = true
 
-        startForeground(NOTIFICATION_ID, createNotification(getString(R.string.service_starting)))
+        startForeground(NOTIFICATION_ID, createNotification(localizedString(R.string.service_starting)))
         acquireWakeLock()
 
         serviceScope.launch {
@@ -282,7 +283,7 @@ class ProxyService : Service() {
                     val down = extractValue(rawStats, "down=")
 
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
-                    updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
+                    updateNotification("${localizedString(R.string.stat_sessions)}: $sessions  •  ${localizedString(R.string.stat_down)}: $down  •  ${localizedString(R.string.stat_up)}: $up")
                 }
                 delay(2000)
             }
@@ -320,14 +321,14 @@ class ProxyService : Service() {
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.app_name))
+            .setContentTitle(localizedString(R.string.app_name))
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_tabler_shield_lock)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
-            .addAction(0, getString(R.string.action_disconnect), stopPendingIntent)
+            .addAction(0, localizedString(R.string.action_disconnect), stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
@@ -343,7 +344,7 @@ class ProxyService : Service() {
 
         serviceScope.launch {
             reconnectMutex.withLock {
-                updateNotification(getString(R.string.service_stopping))
+                updateNotification(localizedString(R.string.service_stopping))
                 withContext(Dispatchers.IO) {
                     NativeProxy.stopProxy()
                 }
@@ -381,6 +382,9 @@ class ProxyService : Service() {
             AppLog.i("Service", "App swiped from recents, service kept alive")
         }
     }
+
+    private fun localizedString(@androidx.annotation.StringRes resource: Int): String =
+        ContextCompat.getString(this, resource)
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

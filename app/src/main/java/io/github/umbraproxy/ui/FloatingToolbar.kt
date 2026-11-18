@@ -2,18 +2,19 @@ package io.github.umbraproxy.ui
 
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -35,6 +36,7 @@ fun FloatingToolbar(
     onThemeChange: (String) -> Unit,
     isDynamicColor: Boolean,
     onDynamicColorChange: (Boolean) -> Unit,
+    onLanguageChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -47,20 +49,21 @@ fun FloatingToolbar(
     }
 
     var offsetY by rememberSaveable { mutableFloatStateOf(-1f) }
-    var isRightSide by rememberSaveable { mutableStateOf(true) }
     var isExpanded by rememberSaveable { mutableStateOf(false) }
     var tabHeightPx by remember { mutableFloatStateOf(0f) }
     var panelHeightPx by remember { mutableFloatStateOf(0f) }
 
     val tabWidthDp = 42.dp
     val tabHeightDp = 52.dp
-    val panelWidthDp = 220.dp
+    val panelWidthDp = minOf(220.dp, (configuration.screenWidthDp.dp - tabWidthDp - 16.dp).coerceAtLeast(120.dp))
 
     val tabWidthPx = remember(density) { with(density) { tabWidthDp.toPx() } }
     val fallbackTabHeightPx = remember(density) { with(density) { tabHeightDp.toPx() } }
     val edgePaddingPx = remember(density) { with(density) { 8.dp.toPx() } }
     val safeTopPx = WindowInsets.safeDrawing.getTop(density).toFloat()
     val safeBottomPx = WindowInsets.safeDrawing.getBottom(density).toFloat()
+    val panelMaxHeight = with(density) { (screenHeightPx - safeTopPx - safeBottomPx - 16.dp.toPx()).coerceAtLeast(64.dp.toPx()).toDp() }
+    val currentLanguage = if (configuration.locales[0].language == "ar") "ar" else "en"
     val effectiveTabHeightPx = maxOf(tabHeightPx, fallbackTabHeightPx)
     val floatingHeightPx = if (isExpanded && panelHeightPx > 0f) {
         maxOf(effectiveTabHeightPx, panelHeightPx)
@@ -72,13 +75,7 @@ fun FloatingToolbar(
         .coerceAtLeast(minOffsetY)
     val defaultOffsetY = (screenHeightPx * 0.24f).coerceIn(minOffsetY, maxOffsetY)
 
-    val targetXPx = if (isRightSide) screenWidthPx - tabWidthPx else 0f
-
-    val animatedTabXPx by animateFloatAsState(
-        targetValue = targetXPx,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "tab_shift"
-    )
+    val tabXPx = screenWidthPx - tabWidthPx
 
     LaunchedEffect(minOffsetY, maxOffsetY) {
         offsetY = if (offsetY < 0f) {
@@ -88,11 +85,11 @@ fun FloatingToolbar(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = AbsoluteAlignment.TopLeft) {
         Surface(
             onClick = { isExpanded = !isExpanded },
             modifier = Modifier
-                .offset { IntOffset(animatedTabXPx.roundToInt(), offsetY.roundToInt()) }
+                .absoluteOffset { IntOffset(tabXPx.roundToInt(), offsetY.roundToInt()) }
                 .onGloballyPositioned { coordinates ->
                     tabHeightPx = coordinates.size.height.toFloat()
                 }
@@ -104,10 +101,7 @@ fun FloatingToolbar(
                         }
                     )
                 },
-            shape = if (isRightSide)
-                RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
-            else
-                RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp),
+            shape = AbsoluteRoundedCornerShape(topLeft = 14.dp, bottomLeft = 14.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
             shadowElevation = 6.dp,
             tonalElevation = 4.dp,
@@ -129,29 +123,24 @@ fun FloatingToolbar(
             visible = isExpanded,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.offset {
+            modifier = Modifier.absoluteOffset {
                 val panelWidthPx = with(density) { panelWidthDp.toPx() }
                 val gap = with(density) { 8.dp.toPx() }
-                val panelX = if (isRightSide) {
-                    (targetXPx - panelWidthPx - gap).roundToInt()
-                } else {
-                    (tabWidthPx + gap).roundToInt()
-                }
+                val panelX = (tabXPx - panelWidthPx - gap).roundToInt()
                 IntOffset(panelX, offsetY.roundToInt())
             }
         ) {
             Surface(
-                modifier = Modifier.onGloballyPositioned { coordinates ->
+                modifier = Modifier.width(panelWidthDp).heightIn(max = panelMaxHeight).onGloballyPositioned { coordinates ->
                     panelHeightPx = coordinates.size.height.toFloat()
                 },
-                shape = RoundedCornerShape(28.dp), // 🚀 Less aggressive rounding
+                shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 8.dp,
                 tonalElevation = 4.dp,
             ) {
                 Column(
-                    // 🚀 Increased overall padding to give elements room to breathe away from the edges
-                    modifier = Modifier.padding(16.dp).width(panelWidthDp - 32.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
@@ -159,7 +148,6 @@ fun FloatingToolbar(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
-                        // 🚀 Extra padding specifically for the title to push it inward and down
                         modifier = Modifier.padding(start = 8.dp, bottom = 6.dp, top = 4.dp)
                     )
 
@@ -188,7 +176,7 @@ fun FloatingToolbar(
                     val showDynamicColorOn = isDynamicColor && supportsDynamicColor
 
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), // 🚀 Better horizontal alignment
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -196,6 +184,7 @@ fun FloatingToolbar(
                             stringResource(R.string.theme_dynamic),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
                             color = if (supportsDynamicColor) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                         Switch(
@@ -204,6 +193,21 @@ fun FloatingToolbar(
                             enabled = supportsDynamicColor,
                             modifier = Modifier.scale(0.8f)
                         )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Text(stringResource(R.string.language_title), style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LanguageOption(stringResource(R.string.language_arabic), currentLanguage == "ar", Modifier.weight(1f)) {
+                            isExpanded = false
+                            onLanguageChange("ar")
+                        }
+                        LanguageOption(stringResource(R.string.language_english), currentLanguage == "en", Modifier.weight(1f)) {
+                            isExpanded = false
+                            onLanguageChange("en")
+                        }
                     }
                 }
             }
@@ -220,7 +224,7 @@ private fun ThemeOption(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp), // Adjusted to match the new container shape
+        shape = RoundedCornerShape(20.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surface,
     ) {
@@ -244,6 +248,17 @@ private fun ThemeOption(
                 else MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp
             )
+        }
+    }
+}
+
+@Composable
+private fun LanguageOption(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Surface(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
     }
 }
