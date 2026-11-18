@@ -66,6 +66,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.umbraproxy.ui.LogsScreen
+import io.github.umbraproxy.ui.AboutScreen
 import io.github.umbraproxy.ui.FloatingToolbar
 import io.github.umbraproxy.ui.UmbraProxyTheme
 import kotlinx.coroutines.launch
@@ -83,12 +84,14 @@ class MainActivity : ComponentActivity() {
             val isDynamicColor by settingsStore.isDynamicColor.collectAsStateWithLifecycle(initialValue = false)
 
             var showLogsScreen by rememberSaveable { mutableStateOf(false) }
+            var showAboutScreen by rememberSaveable { mutableStateOf(false) }
 
             UmbraProxyTheme(themeMode = themeMode, dynamicColor = isDynamicColor) {
                 Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     UmbraMainScreen(
                         settingsStore = settingsStore,
-                        onOpenLogs = { showLogsScreen = true }
+                        onOpenLogs = { showLogsScreen = true },
+                        onOpenAbout = { showAboutScreen = true }
                     )
 
                     FloatingToolbar(
@@ -108,6 +111,14 @@ class MainActivity : ComponentActivity() {
                             onBack = { showLogsScreen = false }
                         )
                     }
+
+                    AnimatedVisibility(
+                        visible = showAboutScreen,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        AboutScreen(onBack = { showAboutScreen = false })
+                    }
                 }
             }
         }
@@ -116,7 +127,7 @@ class MainActivity : ComponentActivity() {
 
 @SuppressLint("BatteryLife")
 @Composable
-fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
+fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpenAbout: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -290,8 +301,11 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                IconButton(onClick = onOpenAbout) {
+                    Icon(painterResource(R.drawable.ic_tabler_info_circle), contentDescription = stringResource(R.string.about_title), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 IconButton(onClick = onOpenLogs) {
                     Icon(painterResource(R.drawable.ic_tabler_terminal_2), contentDescription = stringResource(R.string.tooltip_view_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -318,11 +332,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit) {
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
-            if (isRunning) {
-                Text(stringResource(R.string.health_hint), style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp))
-            }
 
             AnimatedVisibility(
                 visible = isRunning,

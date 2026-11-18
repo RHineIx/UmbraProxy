@@ -78,5 +78,12 @@
     <string name="health_available">مسار الاتصال متاح</string>
     <string name="health_unavailable">تعذر الوصول عبر المسارات</string>
     <string name="health_offline">لا يوجد اتصال بالشبكة</string>
-    <string name="health_hint">افتح تيليجرام للتحقق من الاتصال.</string>
+    <string name="about_title">حول التطبيق</string>
+    <string name="about_back">رجوع</string>
+    <string name="about_description">بروكسي تيليجرام يعمل على جهازك.</string>
+    <string name="about_version">الإصدار %1$s</string>
+    <string name="about_developer">المطوّر</string>
+    <string name="about_telegram">تيليجرام</string>
+    <string name="about_github">GitHub</string>
+    <string name="about_link_failed">لا يوجد تطبيق لفتح هذا الرابط.</string>
 </resources>

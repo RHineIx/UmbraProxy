@@ -24,8 +24,9 @@ The service polls native listener health every two seconds and attempts a soft
 restart if the listener disappears. External checks run only while Android has a
 default network and skip network activity when a relay is already established.
 Checks wait 30 seconds after a first failure, then 60 and at most 120 seconds;
-success and network restarts reset that backoff. The notification and Quick
-Settings subtitle use the same health state as the main screen.
+success and network restarts reset that backoff. The main screen and Quick
+Settings subtitle show connection health; the foreground notification keeps its
+compact session and transfer counters.
 
 Each client gets a 15-second budget for upstream setup, separate from handshake
 and established-session lifetimes. Direct WebSocket attempts have a four-second

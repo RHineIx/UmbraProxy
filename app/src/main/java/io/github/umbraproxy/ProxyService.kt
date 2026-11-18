@@ -282,8 +282,7 @@ class ProxyService : Service() {
                     val down = extractValue(rawStats, "down=")
 
                     _liveStats.value = ProxyStats(sessions = sessions, up = up, down = down)
-                    val status = getString(_health.value.labelResource(_isRunning.value, _isStarting.value))
-                    updateNotification("$status · ${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
+                    updateNotification("${getString(R.string.stat_sessions)}: $sessions  •  ${getString(R.string.stat_down)}: $down  •  ${getString(R.string.stat_up)}: $up")
                 }
                 delay(2000)
             }
