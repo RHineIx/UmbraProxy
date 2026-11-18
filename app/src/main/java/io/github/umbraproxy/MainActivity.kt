@@ -301,10 +301,6 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpen
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                IconButton(onClick = onOpenUpdates) {
-                    Icon(painterResource(R.drawable.ic_tabler_download), stringResource(R.string.updates_title),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
                 IconButton(onClick = onOpenLogs) {
                     Icon(painterResource(R.drawable.ic_tabler_terminal_2), contentDescription = stringResource(R.string.tooltip_view_logs), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -492,7 +488,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpen
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
-            DeveloperFooter(modifier = Modifier.fillMaxWidth())
+            DeveloperFooter(onOpenUpdates = onOpenUpdates, modifier = Modifier.fillMaxWidth())
         }
     }
 }

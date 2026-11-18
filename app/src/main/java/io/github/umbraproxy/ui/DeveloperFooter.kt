@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -21,7 +20,7 @@ import io.github.umbraproxy.BuildConfig
 import io.github.umbraproxy.R
 
 @Composable
-fun DeveloperFooter(modifier: Modifier = Modifier) {
+fun DeveloperFooter(onOpenUpdates: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     fun openProfile(url: String) {
         try {
@@ -33,8 +32,6 @@ fun DeveloperFooter(modifier: Modifier = Modifier) {
     Column(modifier = modifier.padding(top = 12.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("@RHineIx", style = MaterialTheme.typography.labelMedium.copy(textDirection = TextDirection.Ltr),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), modifier = Modifier.padding(end = 8.dp))
                 IconButton(onClick = { openProfile("https://t.me/RHineix") }) {
                     Icon(painterResource(R.drawable.ic_telegram), stringResource(R.string.profile_telegram),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
@@ -45,7 +42,9 @@ fun DeveloperFooter(modifier: Modifier = Modifier) {
                 }
             }
         }
-        Text(stringResource(R.string.app_version, BuildConfig.VERSION_NAME),
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+        TextButton(onClick = onOpenUpdates) {
+            Text(stringResource(R.string.app_version, BuildConfig.VERSION_NAME),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+        }
     }
 }

@@ -111,11 +111,11 @@ work. Boot startup is optional and subject to Android/vendor background limits.
 The floating palette contains appearance settings and Arabic / English language
 selection. Language changes apply immediately, including layout direction, and
 persist across restarts. On Android 13 and later, the selection is also available
-in Android's per-app language settings. Developer profile icons sit beside
-`@RHineIx` at the bottom of the main screen, with the installed version below.
+in Android's per-app language settings. Developer profile icons sit at the bottom
+of the main screen, with the installed version below.
 
-The download icon opens update checking against this repository's latest stable
-GitHub Release. The installed APK's native libraries determine ARM64, ARMv7, or
+Tapping the installed version opens update checking against this repository's
+latest stable GitHub Release. The installed APK's native libraries determine ARM64, ARMv7, or
 universal selection; a missing architecture asset can fall back to universal.
 Version comparison respects numeric components and prerelease ordering. Android
 10 and later use the system Download Manager; older Android versions and devices
