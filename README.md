@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="README.md"><img src="https://img.shields.io/badge/English-2563EB?style=for-the-badge" alt="English"></a>
-  <a href="README.ar.md"><img src="https://img.shields.io/badge/%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-475569?style=for-the-badge" alt="العربية"></a>
+  <a href="README.ar.md"><img src="docs/assets/language-ar.svg" alt="العربية"></a>
 </p>
 
 ## Download
