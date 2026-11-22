@@ -25,6 +25,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -129,6 +131,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpen
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val scrollState = rememberScrollState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
@@ -294,7 +297,7 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpen
         modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
     ) { innerPadding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+            modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(scrollState).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -312,7 +315,18 @@ fun UmbraMainScreen(settingsStore: SettingsStore, onOpenLogs: () -> Unit, onOpen
                 focusManager.clearFocus()
                 if (isRunning) ProxyController.stop(context)
                 else if (!isStarting) {
-                    scope.launch { ProxyController.startFromSavedSettings(context, true) }
+                    scope.launch {
+                        if (ProxyController.startFromSavedSettings(context, true)) {
+                            scrollState.scroll {
+                                val start = scrollState.value
+                                // Follow the content height while the connection statistics expand.
+                                animate(0f, 1f, animationSpec = tween(700, easing = FastOutSlowInEasing)) { progress, _ ->
+                                    val target = start + (scrollState.maxValue - start) * progress
+                                    scrollBy(target - scrollState.value)
+                                }
+                            }
+                        }
+                    }
                 }
             })
 
