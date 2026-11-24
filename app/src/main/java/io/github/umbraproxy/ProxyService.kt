@@ -35,6 +35,8 @@ class ProxyService : Service() {
     private var watchdogJob: Job? = null
     private var healthProbeJob: Job? = null
     private var networkAvailable = false
+    private var notificationStartedAtMillis = 0L
+    private var lastNotificationContent: String? = null
 
     @Volatile private var stopping = false
     private var lastPoolSize = 4
@@ -180,7 +182,10 @@ class ProxyService : Service() {
 
         _isStarting.value = true
 
-        startForeground(NOTIFICATION_ID, createNotification(localizedString(R.string.service_starting)))
+        val startingMessage = localizedString(R.string.service_starting)
+        notificationStartedAtMillis = System.currentTimeMillis()
+        startForeground(NOTIFICATION_ID, createNotification(startingMessage))
+        lastNotificationContent = startingMessage
         acquireWakeLock()
 
         serviceScope.launch {
@@ -307,9 +312,11 @@ class ProxyService : Service() {
     }
 
     private fun updateNotification(content: String) {
+        if (notificationStartedAtMillis == 0L || content == lastNotificationContent) return
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, createNotification(content))
+            lastNotificationContent = content
         } catch (e: Exception) { AppLog.w("Service", "Failed to notify", e) }
     }
 
@@ -324,6 +331,8 @@ class ProxyService : Service() {
             .setContentTitle(localizedString(R.string.app_name))
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_tabler_shield_lock)
+            .setWhen(notificationStartedAtMillis)
+            .setShowWhen(true)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
